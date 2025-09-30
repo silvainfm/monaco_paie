@@ -1,0 +1,17 @@
+Matricule,Nom,Prénom,Email,Salaire de base,Base heures,Heures congés payés,Heures absence,Type absence,Prime,Type de prime,Heures Sup 125,Heures Sup 150,Heures jours feries,Heures dimanche,Tickets restaurant,Avantage logement,Avantage transport,Pays résidence,Date de Sortie,Remarques
+S000000059,FENEUX,Bérengère,berengere.feneux@carax.mc,3500,169,0,0,,0,,0,0,0,0,20,0,50,MONACO,,
+S000000053,BRAMI,Jonathan,jonathan.brami@carax.mc,8500,169,14,0,,1500,performance,8,0,7,0,22,0,0,FRANCE,,À vérifier salaire
+S000000061,BOURDJI,Taisyr,taisyr.bourdji@carax.mc,3200,169,7,14,conges_sans_solde,0,,0,0,0,0,18,0,30,MONACO,,
+S000000062,PEYRE,Ambre,ambre.peyre@carax.mc,2800,169,0,0,,0,,0,0,0,0,20,0,50,MONACO,,
+S000000031,LEMAITRE,Xavier,xavier.lemaitre@carax.mc,6200,169,21,0,,800,anciennete,12,4,7,0,21,0,0,FRANCE,,
+S000000039,WALLAERT,Rémy,remy.wallaert@carax.mc,45000,169,0,0,,15000,performance,20,8,14,8,22,2000,0,MONACO,,Bonus exceptionnel approuvé
+S000000055,GERS,Sébastien,sebastien.gers@carax.mc,8200,169,7,7,maladie_maintenue,2000,performance,5,0,7,0,20,0,40,MONACO,,
+S000000058,GUYON,Raphael,raphael.guyon@carax.mc,2900,169,14,62,maladie_maintenue,0,,3.5,0,7.25,0,7,0,50,MONACO,,
+S000000060,LEBUFNOIR,Guillaume,guillaume.lebufnoir@carax.mc,6800,169,0,0,,1200,performance,10,2,0,4,22,0,60,ITALY,,Nouveau résident Italien
+S000000050,BELLICARDI,François,francois.bellicardi@carax.mc,5800,169,28,0,,500,anciennete,0,0,7,0,19,0,50,MONACO,,
+S000000049,BERTHIER DELACOUR,Martin,martin.berthier-delacour@carax.mc,5200,169,7,21,non_payee,800,performance,6,0,0,0,21,0,0,FRANCE,,Retard récurrent
+S000000046,CHICHE,Pierre Laurent,pierre.chiche@carax.mc,5700,169,0,0,,1000,performance,8,3,7,0,20,0,45,MONACO,,
+S000000040,FROMAGER,Arthur,arthur.fromager@carax.mc,3100,169,14,0,,0,,0,0,0,0,20,0,50,MONACO,,
+S000000052,AZOULAY,Rudy,rudy.azoulay@carax.mc,3800,169,7,35,maladie_maintenue,400,anciennete,4,0,0,0,15,0,35,MONACO,,
+S000000044,ASTOLFI,Anthony,anthony.astolfi@carax.mc,2500,169,0,0,,0,,0,0,0,0,20,0,50,MONACO,,
+S000000041,MITELBERG,Stephan,stephan.mitelberg@carax.mc,8600,169,21,0,,2500,performance,15,5,14,6,22,1500,0,ITALY,31/12/2024,Fin de contrat

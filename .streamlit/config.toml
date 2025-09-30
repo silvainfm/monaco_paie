@@ -1,0 +1,15 @@
+# .streamlit/secrets.toml
+
+[security]
+# Optional flags you might find handy
+allow_signup = false
+
+# A simple mapping from username -> inline table with hash + role
+[security.users]
+nick   = { hash = "sha256:PUT_SHA256_HEX_HERE", role = "admin" }
+devin  = { hash = "sha256:PUT_SHA256_HEX_HERE", role = "admin" }
+
+alice  = { hash = "sha256:PUT_SHA256_HEX_HERE", role = "user" }
+bob    = { hash = "sha256:PUT_SHA256_HEX_HERE", role = "user" }
+carol  = { hash = "sha256:PUT_SHA256_HEX_HERE", role = "user" }
+# ... add the rest of your users the same way
