@@ -812,8 +812,9 @@ def pdf_generation_page():
         return
     
     system = st.session_state.payroll_system
-    month_str, year_str = st.session_state.current_period.split('-')
-    year, month = int(year_str), int(month_str)
+    period_parts = st.session_state.current_period.split('-')
+    month = int(period_parts[0])
+    year = int(period_parts[1])
 
     df = system.data_consolidator.load_period_data(st.session_state.current_company, month, year)
 
@@ -867,9 +868,12 @@ def pdf_generation_page():
                         employee_data = df[df['matricule'] == matricule].iloc[0].to_dict()
                         
                         # Add period information for PDF generation
-                        period_date = datetime(year, month, 1)
-                        last_day = (period_date.replace(month=period_date.month+1) - timedelta(days=1)).day if month < 12 else 31
-                        
+                        if month < 12:
+                            next_month = period_date.replace(month=month+1)
+                            last_day = (next_month - timedelta(days=1)).day
+                        else:
+                            last_day = 31
+                            
                         employee_data['period_start'] = f"01/{month:02d}/{year}"
                         employee_data['period_end'] = f"{last_day:02d}/{month:02d}/{year}"
                         employee_data['payment_date'] = f"{last_day:02d}/{month:02d}/{year}"
