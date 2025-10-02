@@ -29,3 +29,4 @@ bcrypt
 schedule
 openpyxl
 xlsxwriter
+calendar
