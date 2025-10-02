@@ -815,6 +815,7 @@ def pdf_generation_page():
     period_parts = st.session_state.current_period.split('-')
     month = int(period_parts[0])
     year = int(period_parts[1])
+    period_date = datetime(year=year, month=month, day=1)
 
     df = system.data_consolidator.load_period_data(st.session_state.current_company, month, year)
 
@@ -866,14 +867,13 @@ def pdf_generation_page():
                         # Extract matricule from selection
                         matricule = selected_employee.split(' - ')[0]
                         employee_data = df[df['matricule'] == matricule].iloc[0].to_dict()
-                        
                         # Add period information for PDF generation
                         if month < 12:
                             next_month = period_date.replace(month=month+1)
                             last_day = (next_month - timedelta(days=1)).day
                         else:
                             last_day = 31
-                            
+
                         employee_data['period_start'] = f"01/{month:02d}/{year}"
                         employee_data['period_end'] = f"{last_day:02d}/{month:02d}/{year}"
                         employee_data['payment_date'] = f"{last_day:02d}/{month:02d}/{year}"
@@ -927,7 +927,6 @@ def pdf_generation_page():
                 try:
                     with st.spinner("Génération de tous les bulletins en cours..."):
                         # Add period information to all employees
-                        period_date = datetime(year, month, 1)
                         last_day = (period_date.replace(month=period_date.month+1) - timedelta(days=1)).day if month < 12 else 31
                         
                         df_copy = df.copy()
@@ -1002,7 +1001,7 @@ def pdf_generation_page():
                     # Store in session state
                     st.session_state.generated_pdfs[pdf_key]['journal'] = {
                         'buffer': journal_buffer.getvalue(),
-                        'filename': f"journal_paie_{st.session_state.current_company}_{year}_{month:02d}.pdf",
+                        'filename': f"journal_paie_{st.session_state.current_company}_{month:02d}_{year}.pdf",
                         'generated_at': datetime.now()
                     }
                     

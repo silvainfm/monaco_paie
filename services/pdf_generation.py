@@ -1676,7 +1676,7 @@ class PDFGeneratorService:
         
         Args:
             employees_df: DataFrame avec les données de tous les employés
-            period: Période au format "YYYY-MM"
+            period: Période au format "MM-YYYY"
             output_dir: Répertoire de sortie (optionnel)
         
         Returns:
@@ -1690,7 +1690,7 @@ class PDFGeneratorService:
         # Préparer les données de période
         period_date = datetime.strptime(period, "%m-%Y")
         period_start = period_date.replace(day=1).strftime("%d/%m/%Y")
-        last_day = calendar.monthrange(period_date.year, period_date.month)[1]
+        last_day = calendar.monthrange(period_date.month, period_date.year)[1]
         period_end = period_date.replace(day=last_day).strftime("%d/%m/%Y")
         payment_date = period_end  # Paiement le dernier jour du mois
         
@@ -1835,7 +1835,7 @@ class PDFGeneratorService:
         
         Args:
             employee_data: Données de l'employé
-            period: Période au format "YYYY-MM"
+            period: Période au format "MM-YYYY"
         
         Returns:
             Buffer PDF prêt pour l'envoi
@@ -1866,6 +1866,7 @@ def test_pdf_generation():
     }
     
     # Example data
+    # add in the period_start, period_end, payment_date for testing
     test_employee = {
         'matricule': 'S000000001',
         'ccss_number': '555174',
@@ -1873,6 +1874,9 @@ def test_pdf_generation():
         'prenom': 'Jean',
         'emploi': 'Sales Assistant',
         'classification': 'Non cadre',
+        'period_start': '01/05/2024',
+        'period_end': '31/05/2024',
+        'payment_date': '31/05/2024',
         'salaire_base': 3500.00,
         'base_heures': 169,
         'taux_horaire': 20.71,

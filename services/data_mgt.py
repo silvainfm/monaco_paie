@@ -84,7 +84,7 @@ class DataConsolidation:
         """Obtenir le chemin du fichier consolidé pour une période"""
         data_dir = CONSOLIDATED_DIR / str(year)
         data_dir.mkdir(parents=True, exist_ok=True)
-        filename = f"{company_id}_{year}_{month:02d}.parquet"
+        filename = f"{company_id}_{month:02d}_{year}.parquet"
         return data_dir / filename
     
     @staticmethod
@@ -95,7 +95,7 @@ class DataConsolidation:
         df['company_id'] = company_id
         df['period_year'] = year
         df['period_month'] = month
-        df['period_str'] = f"{year}-{month:02d}"
+        df['period_str'] = f"{month:02d}-{year}"
         df['last_modified'] = datetime.now()
         
         if HAS_PYARROW:
