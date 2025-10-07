@@ -610,9 +610,27 @@ def dashboard_page():
     with col2:
         st.subheader("Distribution des salaires nets")
         if 'salaire_net' in df.columns and not df['salaire_net'].isna().all():
-            fig_data = df['salaire_net'].astype(float).dropna() ## to fix 
-            #altair.utils.schemapi.SchemaValidationError: Multiple errors were found. Error 1: '(1394.956, 7066.475]' is an invalid value for `0`. Valid values are of type 'number', 'string', 'boolean', or 'object'. Error 2: '(7066.475, 12681.84]' is an invalid value for `1`. Valid values are of type 'number', 'string', 'boolean', or 'object'. Error 3: '(12681.84, 18297.205]' is an invalid value for `2`. Valid values are of type 'number', 'string', 'boolean', or 'object'.
-            st.bar_chart(pd.cut(fig_data, bins=10).value_counts().sort_index())
+            fig_data = df['salaire_net'].astype(float).dropna()
+            # Create bins
+            binned = pd.cut(fig_data, bins=10)
+            counts = binned.value_counts().sort_index()
+            
+            # Create cleaner labels with K for thousands
+            def format_salary(value):
+                """Format salary with K for thousands"""
+                if value >= 1000:
+                    return f"{int(value/1000)}K"
+                else:
+                    return f"{int(value)}"
+            
+            clean_labels = [
+                f"{format_salary(interval.left)}-{format_salary(interval.right)}€"
+                for interval in counts.index
+            ]
+            
+            # Create a new series with clean labels, maintaining order
+            chart_data = pd.Series(counts.values, index=clean_labels)
+            st.bar_chart(chart_data)
     
     st.markdown("---")
     st.subheader("Employés avec cas particuliers")
@@ -900,23 +918,6 @@ def pdf_generation_page():
         employee_options = [f"{emp['matricule']} - {emp['nom']} {emp['prenom']}" for emp in employees]
         
         selected_employee = st.selectbox("Sélectionner un employé", employee_options)
-        
-        # In tab1, around line 885, add this debugging:
-        matricule = selected_employee.split(' - ')[0]
-        employee_raw = df[df['matricule'] == matricule].iloc[0].to_dict()
-
-        # DEBUG: Print what we're getting
-        st.write("DEBUG - Raw employee data types:")
-        for key in ['salaire_brut', 'salaire_base', 'salaire_net', 'details_charges']:
-            if key in employee_raw:
-                st.write(f"{key}: {type(employee_raw[key])} = {employee_raw[key]}")
-
-        employee_data = clean_employee_data_for_pdf(employee_raw)
-
-        # DEBUG: Print cleaned data
-        st.write("DEBUG - Cleaned employee data:")
-        st.write(f"salaire_brut type: {type(employee_data.get('salaire_brut'))}")
-        st.write(f"salaire_brut value: {employee_data.get('salaire_brut')}")
         
         col1, col2 = st.columns(2)
         
