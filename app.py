@@ -806,35 +806,46 @@ def validation_page():
                         st.rerun()
 
 def clean_employee_data_for_pdf(employee_dict: Dict) -> Dict:
-        """Clean employee data to ensure numeric fields are not dicts"""
-        numeric_fields = [
-            'salaire_brut', 'salaire_base', 'salaire_net', 
-            'total_charges_salariales', 'total_charges_patronales',
-            'heures_sup_125', 'heures_sup_150', 'prime',
-            'montant_hs_125', 'montant_hs_150', 'cout_total_employeur',
-            'taux_horaire', 'base_heures', 'heures_payees',
-            'retenue_absence', 'heures_absence', 'indemnite_cp',
-            'heures_jours_feries', 'montant_jours_feries',
-            'cumul_brut', 'cumul_base_ss', 'cumul_net_percu',
-            'cumul_charges_sal', 'cumul_charges_pat'
-        ]
-        
-        cleaned = employee_dict.copy()
-        for field in numeric_fields:
-            if field in cleaned:
-                value = cleaned[field]
-                if isinstance(value, dict):
-                    # If it's a dict, take the first numeric value or default to 0
-                    cleaned[field] = 0
-                elif pd.isna(value):
-                    cleaned[field] = 0
-                else:
-                    try:
-                        cleaned[field] = float(value)
-                    except (TypeError, ValueError):
-                        cleaned[field] = 0
-        
-        return cleaned
+    """Clean employee data to ensure numeric fields are not dicts"""
+    import numpy as np
+    
+    numeric_fields = [
+        'salaire_brut', 'salaire_base', 'salaire_net', 
+        'total_charges_salariales', 'total_charges_patronales',
+        'heures_sup_125', 'heures_sup_150', 'prime',
+        'montant_hs_125', 'montant_hs_150', 'cout_total_employeur',
+        'taux_horaire', 'base_heures', 'heures_payees',
+        'retenue_absence', 'heures_absence', 'indemnite_cp',
+        'heures_jours_feries', 'montant_jours_feries',
+        'cumul_brut', 'cumul_base_ss', 'cumul_net_percu',
+        'cumul_charges_sal', 'cumul_charges_pat',
+        'jours_cp_pris', 'tickets_restaurant'
+    ]
+    
+    cleaned = {}
+    
+    # Copy all fields
+    for key, value in employee_dict.items():
+        if key in numeric_fields:
+            # Force numeric conversion
+            if isinstance(value, dict):
+                cleaned[key] = 0
+            elif isinstance(value, (list, tuple)):
+                cleaned[key] = 0
+            elif pd.isna(value) or value is None:
+                cleaned[key] = 0
+            elif isinstance(value, (int, float, np.integer, np.floating)):
+                cleaned[key] = float(value)
+            else:
+                try:
+                    cleaned[key] = float(value)
+                except (TypeError, ValueError, AttributeError):
+                    cleaned[key] = 0
+        else:
+            # Keep non-numeric fields as-is
+            cleaned[key] = value
+    
+    return cleaned
 
 def pdf_generation_page():
     """Page de génération des PDFs"""
@@ -889,6 +900,23 @@ def pdf_generation_page():
         employee_options = [f"{emp['matricule']} - {emp['nom']} {emp['prenom']}" for emp in employees]
         
         selected_employee = st.selectbox("Sélectionner un employé", employee_options)
+        
+        # In tab1, around line 885, add this debugging:
+        matricule = selected_employee.split(' - ')[0]
+        employee_raw = df[df['matricule'] == matricule].iloc[0].to_dict()
+
+        # DEBUG: Print what we're getting
+        st.write("DEBUG - Raw employee data types:")
+        for key in ['salaire_brut', 'salaire_base', 'salaire_net', 'details_charges']:
+            if key in employee_raw:
+                st.write(f"{key}: {type(employee_raw[key])} = {employee_raw[key]}")
+
+        employee_data = clean_employee_data_for_pdf(employee_raw)
+
+        # DEBUG: Print cleaned data
+        st.write("DEBUG - Cleaned employee data:")
+        st.write(f"salaire_brut type: {type(employee_data.get('salaire_brut'))}")
+        st.write(f"salaire_brut value: {employee_data.get('salaire_brut')}")
         
         col1, col2 = st.columns(2)
         

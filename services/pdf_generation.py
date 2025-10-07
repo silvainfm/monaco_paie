@@ -1198,8 +1198,8 @@ class PTOProvisionPDFGenerator:
     
     def _get_last_day_of_month(self, date: datetime) -> datetime:
         """Obtenir le dernier jour du mois"""
-        last_day = calendar.monthrange(date.month, date.year)[1]
-        return datetime(last_day, date.month, date.year)
+        last_day = calendar.monthrange(date.year, date.month)[1]
+        return datetime(date.year, date.month, last_day)
     
     def _create_provision_footer(self, period: str) -> Paragraph:
         """Créer le pied de page du document de provision"""
@@ -1635,8 +1635,8 @@ class PayJournalPDFGenerator:
     
     def _get_last_day_of_month(self, date: datetime) -> datetime:
         """Obtenir le dernier jour du mois"""
-        last_day = calendar.monthrange(date.month, date.year)[1]
-        return datetime(date.month, date.year, last_day)
+        last_day = calendar.monthrange(date.year, date.month)[1]
+        return datetime(date.year, date.month, last_day)
     
     def _create_journal_footer(self, period: str) -> Paragraph:
         """Créer le pied de page du journal"""
