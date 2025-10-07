@@ -437,6 +437,7 @@ class IntegratedPayrollSystem:
         
         return report
 
+
 # ============================================================================
 # STREAMLIT UI PAGES
 # ============================================================================
@@ -804,6 +805,37 @@ def validation_page():
                         st.success(f"✅ Fiche validée pour {case['nom']} {case['prenom']}")
                         st.rerun()
 
+def clean_employee_data_for_pdf(employee_dict: Dict) -> Dict:
+        """Clean employee data to ensure numeric fields are not dicts"""
+        numeric_fields = [
+            'salaire_brut', 'salaire_base', 'salaire_net', 
+            'total_charges_salariales', 'total_charges_patronales',
+            'heures_sup_125', 'heures_sup_150', 'prime',
+            'montant_hs_125', 'montant_hs_150', 'cout_total_employeur',
+            'taux_horaire', 'base_heures', 'heures_payees',
+            'retenue_absence', 'heures_absence', 'indemnite_cp',
+            'heures_jours_feries', 'montant_jours_feries',
+            'cumul_brut', 'cumul_base_ss', 'cumul_net_percu',
+            'cumul_charges_sal', 'cumul_charges_pat'
+        ]
+        
+        cleaned = employee_dict.copy()
+        for field in numeric_fields:
+            if field in cleaned:
+                value = cleaned[field]
+                if isinstance(value, dict):
+                    # If it's a dict, take the first numeric value or default to 0
+                    cleaned[field] = 0
+                elif pd.isna(value):
+                    cleaned[field] = 0
+                else:
+                    try:
+                        cleaned[field] = float(value)
+                    except (TypeError, ValueError):
+                        cleaned[field] = 0
+        
+        return cleaned
+
 def pdf_generation_page():
     """Page de génération des PDFs"""
     st.header("📄 Génération des PDFs")
@@ -866,8 +898,10 @@ def pdf_generation_page():
                     try:
                         # Extract matricule from selection
                         matricule = selected_employee.split(' - ')[0]
-                        employee_data = df[df['matricule'] == matricule].iloc[0].to_dict()
-
+                        employee_data = clean_employee_data_for_pdf(
+                            df[df['matricule'] == matricule].iloc[0].to_dict()
+                        )
+                    
                         # Add period information for PDF generation
                         last_day = calendar.monthrange(year, month)[1]
 
@@ -931,6 +965,11 @@ def pdf_generation_page():
                         df_copy['period_end'] = f"{last_day:02d}/{month:02d}/{year}"
                         df_copy['payment_date'] = f"{last_day:02d}/{month:02d}/{year}"
                         
+                        # Clean each row before generating PDFs
+                        cleaned_data = []
+                        for _, row in df_copy.iterrows():
+                            cleaned_data.append(clean_employee_data_for_pdf(row.to_dict()))
+                        df_copy = pd.DataFrame(cleaned_data)
                         documents = pdf_service.generate_monthly_documents(df_copy, f"{month:02d}-{year}")
                         
                         if 'paystubs' in documents:
