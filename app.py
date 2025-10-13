@@ -519,6 +519,7 @@ def main_app():
         
         if st.session_state.role == "admin":
             pages["⚙️ Configuration"] = "config"
+            pages["📋 Journal modifications"] = "audit_log"
         
         # Clean navigation
         st.markdown("**Menu**")
@@ -554,6 +555,8 @@ def main_app():
         export_page()
     elif current_page == "config":
         config_page()
+    elif current_page == "audit_log":
+        audit_log_page()
 
 def dashboard_page():
     """Page tableau de bord"""
@@ -1130,7 +1133,69 @@ def validation_page():
                             st.rerun()
                     else:
                         st.success("✅ Déjà validé")
-                        
+
+def audit_log_page():
+    """View audit trail of modifications"""
+    st.header("📋 Journal des Modifications")
+    
+    if st.session_state.role != 'admin':
+        st.error("Accès réservé aux administrateurs")
+        return
+    
+    import json
+    from pathlib import Path
+    from datetime import datetime
+    
+    log_dir = Path("data/audit_logs")
+    if not log_dir.exists():
+        st.info("Aucune modification enregistrée")
+        return
+    
+    # Load all logs
+    all_logs = []
+    for log_file in log_dir.glob("*.jsonl"):
+        with open(log_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                try:
+                    all_logs.append(json.loads(line))
+                except:
+                    pass
+    
+    if not all_logs:
+        st.info("Aucune modification enregistrée")
+        return
+    
+    # Convert to DataFrame
+    logs_df = pd.DataFrame(all_logs)
+    logs_df['timestamp'] = pd.to_datetime(logs_df['timestamp'])
+    logs_df = logs_df.sort_values('timestamp', ascending=False)
+    
+    # Filters
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        user_filter = st.selectbox("Utilisateur", ["Tous"] + list(logs_df['user'].unique()))
+    with col2:
+        period_filter = st.selectbox("Période", ["Toutes"] + list(logs_df['period'].unique()))
+    with col3:
+        matricule_filter = st.text_input("Matricule")
+    
+    # Apply filters
+    filtered = logs_df.copy()
+    if user_filter != "Tous":
+        filtered = filtered[filtered['user'] == user_filter]
+    if period_filter != "Toutes":
+        filtered = filtered[filtered['period'] == period_filter]
+    if matricule_filter:
+        filtered = filtered[filtered['matricule'].str.contains(matricule_filter, case=False)]
+    
+    st.metric("Total modifications", len(filtered))
+    
+    # Display
+    st.dataframe(
+        filtered[['timestamp', 'user', 'matricule', 'field', 'old_value', 'new_value', 'reason']],
+        use_container_width=True
+    )
+
 def clean_employee_data_for_pdf(employee_dict: Dict) -> Dict:
     """Clean employee data to ensure numeric fields are not dicts"""
     import numpy as np
