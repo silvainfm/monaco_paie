@@ -438,7 +438,7 @@ class IntegratedPayrollSystem:
 def login_page():
     """Page de connexion"""
     st.markdown("""
-        <div style="text-align: center; margin: 3rem 0;">
+        <div style="text-align: center; margin: 2rem 0;">
             <h1 style="color: #2c3e50; font-weight: 700; margin-bottom: 0.5rem;">Logiciel de Paie Monégasque</h1>
             <p style="color: #6c757d; font-size: 1.1rem; margin-bottom: 3rem;">Système professionnel de gestion des paies</p>
         </div>
@@ -447,10 +447,6 @@ def login_page():
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
-        st.markdown("""
-            <div style="background: white; padding: 2.5rem; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1);">
-        """, unsafe_allow_html=True)
-        
         st.markdown("#### Connexion")
         
         with st.form("login_form"):
