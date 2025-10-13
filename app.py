@@ -775,54 +775,362 @@ def processing_page():
         else:
             st.error(f"Erreur: {report.get('error', 'Erreur inconnue')}")
 
-def validation_page():
-    """Page de validation des cas particuliers"""
-    # improvements: show all cases in a table with filter, search, sorting
-    # then expand each case in detail with validation button
-    st.header("✅ Validation des cas particuliers")
+# ============================================================================
+# PAYSLIP EDITING HELPERS
+# ============================================================================
+
+def get_salary_rubrics() -> List[Dict]:
+    """Get salary element rubrics from pdf_generation"""
+    from services.pdf_generation import PaystubPDFGenerator
+    codes = PaystubPDFGenerator.RUBRIC_CODES
     
-    if 'edge_cases' not in st.session_state or not st.session_state.edge_cases:
-        st.info("Aucun cas particulier à valider")
+    return [
+        {'code': codes['salaire_base'], 'label': 'Salaire Mensuel', 'field': 'salaire_base'},
+        {'code': codes['prime_anciennete'], 'label': "Prime d'ancienneté", 'field': 'prime_anciennete'},
+        {'code': codes['heures_sup_125'], 'label': 'Heures sup. 125%', 'field': 'heures_sup_125'},
+        {'code': codes['heures_sup_150'], 'label': 'Heures sup. 150%', 'field': 'heures_sup_150'},
+        {'code': codes['prime_performance'], 'label': 'Prime performance', 'field': 'prime'},
+        {'code': codes['prime_autre'], 'label': 'Autre prime', 'field': 'prime_autre'},
+        {'code': codes['jours_feries'], 'label': 'Jours fériés 100%', 'field': 'heures_jours_feries'},
+        {'code': codes['absence_maladie'], 'label': 'Absence maladie', 'field': 'heures_absence'},
+        {'code': codes['absence_cp'], 'label': 'Absence congés payés', 'field': 'heures_conges_payes'},
+        {'code': codes['indemnite_cp'], 'label': 'Indemnité congés payés', 'field': 'jours_conges_pris'},
+        {'code': codes['tickets_resto'], 'label': 'Tickets restaurant', 'field': 'tickets_restaurant'},
+    ]
+
+def get_charge_rubrics() -> Dict[str, List[Dict]]:
+    """Get social charge rubrics from payroll_calculations"""
+    from services.payroll_calculations import ChargesSocialesMonaco
+    
+    salariales = []
+    for key, params in ChargesSocialesMonaco.COTISATIONS_SALARIALES.items():
+        salariales.append({
+            'code': key,
+            'label': params['description'],
+            'taux': params['taux'],
+            'plafond': params['plafond']
+        })
+    
+    patronales = []
+    for key, params in ChargesSocialesMonaco.COTISATIONS_PATRONALES.items():
+        patronales.append({
+            'code': key,
+            'label': params['description'],
+            'taux': params['taux'],
+            'plafond': params['plafond']
+        })
+    
+    return {
+        'salariales': salariales,
+        'patronales': patronales
+    }
+
+def log_modification(matricule: str, field: str, old_value, new_value, user: str, reason: str):
+    """Log paystub modification for audit trail"""
+    
+    log_dir = Path("data/audit_logs")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    
+    log_entry = {
+        'timestamp': datetime.now().isoformat(),
+        'user': user,
+        'matricule': matricule,
+        'field': field,
+        'old_value': str(old_value),
+        'new_value': str(new_value),
+        'reason': reason,
+        'period': st.session_state.current_period,
+        'company': st.session_state.current_company
+    }
+    
+    log_file = log_dir / f"modifications_{datetime.now().strftime('%Y%m')}.jsonl"
+    with open(log_file, 'a', encoding='utf-8') as f:
+        f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
+
+def recalculate_employee_payslip(employee_data: Dict, modifications: Dict) -> Dict:
+    """Recalculate payslip after modifications"""
+
+    # Apply modifications to employee_data
+    updated_data = employee_data.copy()
+    updated_data.update(modifications)
+    
+    # Recalculate
+    calculator = CalculateurPaieMonaco()
+    return calculator.process_employee_payslip(updated_data)
+
+def validation_page():
+    """Page de validation des cas particuliers avec édition"""
+    st.header("✅ Validation et Modification des Paies")
+    
+    if 'edge_cases' not in st.session_state:
+        st.session_state.edge_cases = []
+    
+    if 'processed_data' not in st.session_state or st.session_state.processed_data.empty:
+        st.info("Aucune donnée traitée. Lancez d'abord le traitement des paies.")
         return
     
+    df = st.session_state.processed_data
     edge_cases = st.session_state.edge_cases
-    st.write(f"**{len(edge_cases)} cas à vérifier**")
     
-    for i, case in enumerate(edge_cases):
-        with st.expander(f"⚠️ {case['nom']} {case['prenom']} - {case['matricule']}"):
-            col1, col2 = st.columns(2)
+    # Filter and search bar
+    col1, col2, col3 = st.columns([2, 2, 1])
+    with col1:
+        search = st.text_input("🔍 Rechercher (matricule, nom, prénom)", "")
+    with col2:
+        status_filter = st.selectbox("Filtrer par statut", 
+                                     ["Tous", "À vérifier", "Validés"])
+    with col3:
+        st.metric("Cas à vérifier", len(edge_cases))
+    
+    # Apply filters
+    filtered_df = df.copy()
+    if search:
+        mask = (filtered_df['matricule'].astype(str).str.contains(search, case=False) |
+                filtered_df['nom'].astype(str).str.contains(search, case=False) |
+                filtered_df['prenom'].astype(str).str.contains(search, case=False))
+        filtered_df = filtered_df[mask]
+    
+    if status_filter == "À vérifier":
+        filtered_df = filtered_df[filtered_df['edge_case_flag'] == True]
+    elif status_filter == "Validés":
+        filtered_df = filtered_df[filtered_df['statut_validation'] == True]
+    
+    st.markdown("---")
+    
+    # Display employees
+    if filtered_df.empty:
+        st.info("Aucun employé trouvé avec ces critères")
+        return
+    
+    for idx, row in filtered_df.iterrows():
+        matricule = row['matricule']
+        is_edge_case = row.get('edge_case_flag', False)
+        is_validated = row.get('statut_validation', False) == True
+        
+        # Expander title with status indicator
+        status_icon = "⚠️" if is_edge_case else ("✅" if is_validated else "⏳")
+        title = f"{status_icon} {row['nom']} {row['prenom']} - {matricule}"
+        
+        with st.expander(title, expanded=is_edge_case):
+            # Initialize edit mode state
+            edit_key = f"edit_mode_{matricule}"
+            if edit_key not in st.session_state:
+                st.session_state[edit_key] = False
             
+            # Show issues if any
+            if is_edge_case:
+                st.warning(f"**Raison:** {row.get('edge_case_reason', 'Non spécifiée')}")
+            
+            # Summary row
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.write("**Problèmes détectés:**")
-                for issue in case.get('issues', []):
-                    st.write(f"• {issue}")
-                
-                if case.get('remarques'):
-                    st.write(f"**Remarques:** {case['remarques']}")
-                
-                if case.get('date_sortie'):
-                    st.write(f"**Date de sortie:** {case['date_sortie']}")
-            
+                st.metric("Salaire brut", f"{row.get('salaire_brut', 0):,.2f} €")
             with col2:
-                if st.button(f"Valider", key=f"validate_{i}"):
-                    if 'processed_data' in st.session_state:
-                        df = st.session_state.processed_data
-                        mask = df['matricule'] == case['matricule']
-                        df.loc[mask, 'statut_validation'] = True
-                        df.loc[mask, 'edge_case_flag'] = False
+                st.metric("Charges sal.", f"{row.get('total_charges_salariales', 0):,.2f} €")
+            with col3:
+                st.metric("Salaire net", f"{row.get('salaire_net', 0):,.2f} €")
+            with col4:
+                st.metric("Coût employeur", f"{row.get('cout_total_employeur', 0):,.2f} €")
+            
+            st.markdown("---")
+            
+            # Toggle edit mode
+            col1, col2, col3 = st.columns([1, 1, 2])
+            with col1:
+                if st.button("✏️ Modifier" if not st.session_state[edit_key] else "❌ Annuler", 
+                           key=f"toggle_edit_{matricule}"):
+                    st.session_state[edit_key] = not st.session_state[edit_key]
+                    st.rerun()
+            
+            # EDIT MODE
+            if st.session_state[edit_key]:
+                st.subheader("📝 Mode Édition")
+                
+                # Initialize modifications storage
+                mod_key = f"modifications_{matricule}"
+                if mod_key not in st.session_state:
+                    st.session_state[mod_key] = {}
+                
+                tab1, tab2 = st.tabs(["💰 Éléments de Salaire", "📊 Charges Sociales"])
+                
+                # TAB 1: SALARY ELEMENTS
+                with tab1:
+                    st.markdown("##### Éléments de rémunération")
+                    
+                    salary_rubrics = get_salary_rubrics()
+                    
+                    # Create editable table
+                    for rubric in salary_rubrics:
+                        field = rubric['field']
+                        current_value = row.get(field, 0)
                         
-                        year, month = map(int, st.session_state.current_period.split('-'))
-                        st.session_state.payroll_system.data_consolidator.save_period_data(
-                            df,
-                            st.session_state.current_company,
-                            year,
-                            month
-                        )
+                        col1, col2, col3 = st.columns([3, 2, 2])
+                        with col1:
+                            st.markdown(f"**{rubric['label']}** `{rubric['code']}`")
+                        with col2:
+                            # Show field type based on name
+                            if 'heures' in field or 'jours' in field:
+                                new_value = st.number_input(
+                                    f"Quantité",
+                                    value=float(current_value),
+                                    step=0.5,
+                                    key=f"sal_{matricule}_{field}",
+                                    label_visibility="collapsed"
+                                )
+                            else:
+                                new_value = st.number_input(
+                                    f"Montant (€)",
+                                    value=float(current_value),
+                                    step=10.0,
+                                    key=f"sal_{matricule}_{field}",
+                                    label_visibility="collapsed"
+                                )
                         
-                        st.session_state.edge_cases.pop(i)
-                        st.success(f"✅ Fiche validée pour {case['nom']} {case['prenom']}")
-                        st.rerun()
-
+                        with col3:
+                            if new_value != current_value:
+                                st.session_state[mod_key][field] = new_value
+                                st.markdown(f"🔄 `{current_value}` → `{new_value}`")
+                            else:
+                                st.markdown(f"`{current_value}`")
+                
+                # TAB 2: SOCIAL CHARGES
+                with tab2:
+                    st.markdown("##### Cotisations sociales")
+                    st.info("ℹ️ Les charges sont recalculées automatiquement. Modifications manuelles possibles si nécessaire.")
+                    
+                    charge_rubrics = get_charge_rubrics()
+                    details_charges = row.get('details_charges', {})
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown("**Charges Salariales**")
+                        charges_sal = details_charges.get('charges_salariales', {})
+                        
+                        for charge in charge_rubrics['salariales']:
+                            current = charges_sal.get(charge['code'], 0)
+                            
+                            c1, c2 = st.columns([2, 1])
+                            with c1:
+                                st.markdown(f"**{charge['label']}** `{charge['code']}`")
+                                st.caption(f"Taux: {charge['taux']}% | Plafond: {charge['plafond'] or 'Aucun'}")
+                            with c2:
+                                new_val = st.number_input(
+                                    "€",
+                                    value=float(current),
+                                    step=1.0,
+                                    key=f"charge_sal_{matricule}_{charge['code']}",
+                                    label_visibility="collapsed"
+                                )
+                                if new_val != current:
+                                    if 'charges_salariales' not in st.session_state[mod_key]:
+                                        st.session_state[mod_key]['charges_salariales'] = {}
+                                    st.session_state[mod_key]['charges_salariales'][charge['code']] = new_val
+                    
+                    with col2:
+                        st.markdown("**Charges Patronales**")
+                        charges_pat = details_charges.get('charges_patronales', {})
+                        
+                        for charge in charge_rubrics['patronales']:
+                            current = charges_pat.get(charge['code'], 0)
+                            
+                            c1, c2 = st.columns([2, 1])
+                            with c1:
+                                st.markdown(f"**{charge['label']}** `{charge['code']}`")
+                                st.caption(f"Taux: {charge['taux']}% | Plafond: {charge['plafond'] or 'Aucun'}")
+                            with c2:
+                                new_val = st.number_input(
+                                    "€",
+                                    value=float(current),
+                                    step=1.0,
+                                    key=f"charge_pat_{matricule}_{charge['code']}",
+                                    label_visibility="collapsed"
+                                )
+                                if new_val != current:
+                                    if 'charges_patronales' not in st.session_state[mod_key]:
+                                        st.session_state[mod_key]['charges_patronales'] = {}
+                                    st.session_state[mod_key]['charges_patronales'][charge['code']] = new_val
+                
+                # Action buttons
+                st.markdown("---")
+                col1, col2, col3 = st.columns([2, 2, 3])
+                
+                with col1:
+                    if st.button("🔄 Recalculer", key=f"recalc_{matricule}", type="primary"):
+                        if st.session_state[mod_key]:
+                            try:
+                                # Recalculate with modifications
+                                updated = recalculate_employee_payslip(
+                                    row.to_dict(), 
+                                    st.session_state[mod_key]
+                                )
+                                
+                                # Update DataFrame
+                                for key, value in updated.items():
+                                    df.at[idx, key] = value
+                                
+                                st.session_state.processed_data = df
+                                st.success("✅ Recalcul effectué!")
+                                st.rerun()
+                                
+                            except Exception as e:
+                                st.error(f"Erreur lors du recalcul: {str(e)}")
+                        else:
+                            st.warning("Aucune modification à appliquer")
+                
+                with col2:
+                    reason = st.text_input("Motif de modification", key=f"reason_{matricule}")
+                    if st.button("💾 Sauvegarder", key=f"save_{matricule}"):
+                        if not reason:
+                            st.error("Le motif est obligatoire")
+                        elif not st.session_state[mod_key]:
+                            st.warning("Aucune modification à sauvegarder")
+                        else:
+                            # Log all modifications
+                            for field, new_value in st.session_state[mod_key].items():
+                                old_value = row.get(field, None)
+                                log_modification(
+                                    matricule, field, old_value, new_value,
+                                    st.session_state.user, reason
+                                )
+                            
+                            # Save to consolidated data
+                            month, year = map(int, st.session_state.current_period.split('-'))
+                            st.session_state.payroll_system.data_consolidator.save_period_data(
+                                df, st.session_state.current_company, month, year
+                            )
+                            
+                            st.success("✅ Modifications sauvegardées!")
+                            st.session_state[mod_key] = {}
+                            st.session_state[edit_key] = False
+                            st.rerun()
+            
+            # VALIDATION BUTTONS (always visible)
+            else:
+                col1, col2 = st.columns([1, 3])
+                with col1:
+                    if not is_validated:
+                        if st.button("✅ Valider", key=f"validate_{matricule}", type="primary"):
+                            df.at[idx, 'statut_validation'] = True
+                            df.at[idx, 'edge_case_flag'] = False
+                            
+                            # Remove from edge cases
+                            st.session_state.edge_cases = [
+                                ec for ec in edge_cases 
+                                if ec['matricule'] != matricule
+                            ]
+                            
+                            # Save
+                            month, year = map(int, st.session_state.current_period.split('-'))
+                            st.session_state.payroll_system.data_consolidator.save_period_data(
+                                df, st.session_state.current_company, month, year
+                            )
+                            
+                            st.success(f"✅ Fiche validée pour {row['nom']} {row['prenom']}")
+                            st.rerun()
+                    else:
+                        st.success("✅ Déjà validé")
+                        
 def clean_employee_data_for_pdf(employee_dict: Dict) -> Dict:
     """Clean employee data to ensure numeric fields are not dicts"""
     import numpy as np
