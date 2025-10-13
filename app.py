@@ -5,6 +5,7 @@ Système complet de gestion des paies pour Monaco
 Version consolidée avec tous les modules intégrés
 
 source monaco_paie/bin/activate
+source .venv/bin/activate
 streamlit run app.py
 """
 
@@ -13,17 +14,9 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, date, timedelta
 import calendar
-import os
+import os, json, io, hashlib, logging, time, base64, shutil, zipfile
 from pathlib import Path
-import json
-import io
 from typing import Dict, List, Optional, Tuple, Union
-import hashlib
-import logging
-import time
-import base64
-import shutil
-import zipfile
 from dataclasses import dataclass, asdict
 from enum import Enum
 from decimal import Decimal, ROUND_HALF_UP
