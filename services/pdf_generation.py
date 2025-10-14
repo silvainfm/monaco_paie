@@ -1688,7 +1688,7 @@ class PDFGeneratorService:
         employees_data = employees_df.to_dict('records')
         
         # Préparer les données de période
-        period_date = datetime.strptime(period, "%m-%Y")
+        period_date = datetime.strptime(period, "%Y-%m")
         period_start = period_date.replace(day=1).strftime("%d/%m/%Y")
         last_day = calendar.monthrange(period_date.month, period_date.year)[1]
         period_end = period_date.replace(day=last_day).strftime("%d/%m/%Y")
@@ -1842,7 +1842,7 @@ class PDFGeneratorService:
         """
         
         # Ajouter les informations de période
-        period_date = datetime.strptime(period, "%m-%Y")
+        period_date = datetime.strptime(period, "%Y-%m")
         period_start = period_date.replace(day=1).strftime("%d/%m/%Y")
         last_day = calendar.monthrange(period_date.year, period_date.month)[1]
         period_end = period_date.replace(day=last_day).strftime("%d/%m/%Y")

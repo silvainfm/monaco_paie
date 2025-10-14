@@ -871,7 +871,7 @@ def validation_page():
                     # Create editable table
                     for rubric in salary_rubrics:
                         field = rubric['field']
-                        current_value = row.get(field, 0)
+                        current_value = safe_get_numeric(row, field, 0.0)
                         
                         col1, col2, col3 = st.columns([3, 2, 2])
                         with col1:
@@ -883,6 +883,7 @@ def validation_page():
                                     f"Quantité",
                                     value=float(current_value),
                                     step=0.5,
+                                    format="%.2f",
                                     key=f"sal_{matricule}_{field}",
                                     label_visibility="collapsed"
                                 )
@@ -891,16 +892,17 @@ def validation_page():
                                     f"Montant (€)",
                                     value=float(current_value),
                                     step=10.0,
+                                    format="%.2f",
                                     key=f"sal_{matricule}_{field}",
                                     label_visibility="collapsed"
                                 )
                         
                         with col3:
-                            if new_value != current_value:
+                            if abs(new_value - current_value) > 0.01:
                                 st.session_state[mod_key][field] = new_value
-                                st.markdown(f"🔄 `{current_value}` → `{new_value}`")
+                                st.markdown(f"🔄 `{current_value:.2f}` → `{new_value:.2f}`")
                             else:
-                                st.markdown(f"`{current_value}`")
+                                st.markdown(f"`{current_value:.2f}`")
                 
                 # TAB 2: SOCIAL CHARGES
                 with tab2:
@@ -1485,9 +1487,54 @@ def log_modification(matricule: str, field: str, old_value, new_value, user: str
 
 def recalculate_employee_payslip(employee_data: Dict, modifications: Dict) -> Dict:
     """Recalculate payslip after modifications"""
-
-    # Apply modifications to employee_data
-    updated_data = employee_data.copy()
+    from services.payroll_calculations import CalculateurPaieMonaco
+    
+    # Deep copy and clean all numeric fields first
+    updated_data = {}
+    
+    # Copy and clean all fields from employee_data
+    for key, value in employee_data.items():
+        if key in ['salaire_brut', 'salaire_base', 'salaire_net', 'total_charges_salariales', 
+                   'total_charges_patronales', 'heures_sup_125', 'heures_sup_150', 'prime',
+                   'montant_hs_125', 'montant_hs_150', 'cout_total_employeur', 'taux_horaire',
+                   'base_heures', 'heures_payees', 'retenue_absence', 'heures_absence',
+                   'indemnite_cp', 'heures_jours_feries', 'montant_jours_feries',
+                   'prime_anciennete', 'prime_autre', 'tickets_restaurant']:
+            # Force numeric conversion
+            if isinstance(value, dict):
+                updated_data[key] = 0.0
+            elif pd.isna(value) or value is None:
+                updated_data[key] = 0.0
+            else:
+                try:
+                    updated_data[key] = float(value)
+                except (TypeError, ValueError):
+                    updated_data[key] = 0.0
+        else:
+            updated_data[key] = value
+    
+    # Handle nested charges updates
+    if 'charges_salariales' in modifications or 'charges_patronales' in modifications:
+        if 'details_charges' not in updated_data:
+            updated_data['details_charges'] = {'charges_salariales': {}, 'charges_patronales': {}}
+        if not isinstance(updated_data['details_charges'], dict):
+            updated_data['details_charges'] = {'charges_salariales': {}, 'charges_patronales': {}}
+            
+        if 'charges_salariales' in modifications:
+            if 'charges_salariales' not in updated_data['details_charges']:
+                updated_data['details_charges']['charges_salariales'] = {}
+            updated_data['details_charges']['charges_salariales'].update(modifications['charges_salariales'])
+            
+        if 'charges_patronales' in modifications:
+            if 'charges_patronales' not in updated_data['details_charges']:
+                updated_data['details_charges']['charges_patronales'] = {}
+            updated_data['details_charges']['charges_patronales'].update(modifications['charges_patronales'])
+        
+        # Remove from top-level modifications
+        modifications = {k: v for k, v in modifications.items() 
+                        if k not in ['charges_salariales', 'charges_patronales']}
+    
+    # Apply remaining modifications (these are already numeric from the form inputs)
     updated_data.update(modifications)
     
     # Recalculate
@@ -1598,6 +1645,33 @@ def clean_employee_data_for_pdf(employee_dict: Dict) -> Dict:
     
     return cleaned
 
+def safe_get_charge_value(details_charges: Dict, charge_type: str, charge_code: str) -> float:
+    """Safely extract charge value from details_charges structure"""
+    try:
+        charges = details_charges.get(charge_type, {})
+        if isinstance(charges, dict):
+            value = charges.get(charge_code, 0)
+            if isinstance(value, dict):
+                # If it's still a dict, try to extract 'montant' or 'value' key
+                return float(value.get('montant', value.get('value', 0)))
+            return float(value) if value is not None else 0.0
+        return 0.0
+    except (TypeError, ValueError, AttributeError):
+        return 0.0
+
+def safe_get_numeric(row: pd.Series, field: str, default: float = 0.0) -> float:
+    """Safely extract numeric value from row, handling dict/nested structures"""
+    try:
+        value = row.get(field, default)
+        if isinstance(value, dict):
+            # Try common dict keys
+            return float(value.get('montant', value.get('value', value.get('amount', default))))
+        if pd.isna(value) or value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError, AttributeError):
+        return default
+    
 # ============================================================================
 # ADMIN USER MANAGEMENT
 # ============================================================================
