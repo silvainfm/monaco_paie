@@ -767,89 +767,6 @@ def processing_page():
         else:
             st.error(f"Erreur: {report.get('error', 'Erreur inconnue')}")
 
-# ============================================================================
-# PAYSLIP EDITING HELPERS
-# ============================================================================
-
-def get_salary_rubrics() -> List[Dict]:
-    """Get salary element rubrics from pdf_generation"""
-    from services.pdf_generation import PaystubPDFGenerator
-    codes = PaystubPDFGenerator.RUBRIC_CODES
-    
-    return [
-        {'code': codes['salaire_base'], 'label': 'Salaire Mensuel', 'field': 'salaire_base'},
-        {'code': codes['prime_anciennete'], 'label': "Prime d'ancienneté", 'field': 'prime_anciennete'},
-        {'code': codes['heures_sup_125'], 'label': 'Heures sup. 125%', 'field': 'heures_sup_125'},
-        {'code': codes['heures_sup_150'], 'label': 'Heures sup. 150%', 'field': 'heures_sup_150'},
-        {'code': codes['prime_performance'], 'label': 'Prime performance', 'field': 'prime'},
-        {'code': codes['prime_autre'], 'label': 'Autre prime', 'field': 'prime_autre'},
-        {'code': codes['jours_feries'], 'label': 'Jours fériés 100%', 'field': 'heures_jours_feries'},
-        {'code': codes['absence_maladie'], 'label': 'Absence maladie', 'field': 'heures_absence'},
-        {'code': codes['absence_cp'], 'label': 'Absence congés payés', 'field': 'heures_conges_payes'},
-        {'code': codes['indemnite_cp'], 'label': 'Indemnité congés payés', 'field': 'jours_conges_pris'},
-        {'code': codes['tickets_resto'], 'label': 'Tickets restaurant', 'field': 'tickets_restaurant'},
-    ]
-
-def get_charge_rubrics() -> Dict[str, List[Dict]]:
-    """Get social charge rubrics from payroll_calculations"""
-    from services.payroll_calculations import ChargesSocialesMonaco
-    
-    salariales = []
-    for key, params in ChargesSocialesMonaco.COTISATIONS_SALARIALES.items():
-        salariales.append({
-            'code': key,
-            'label': params['description'],
-            'taux': params['taux'],
-            'plafond': params['plafond']
-        })
-    
-    patronales = []
-    for key, params in ChargesSocialesMonaco.COTISATIONS_PATRONALES.items():
-        patronales.append({
-            'code': key,
-            'label': params['description'],
-            'taux': params['taux'],
-            'plafond': params['plafond']
-        })
-    
-    return {
-        'salariales': salariales,
-        'patronales': patronales
-    }
-
-def log_modification(matricule: str, field: str, old_value, new_value, user: str, reason: str):
-    """Log paystub modification for audit trail"""
-    
-    log_dir = Path("data/audit_logs")
-    log_dir.mkdir(parents=True, exist_ok=True)
-    
-    log_entry = {
-        'timestamp': datetime.now().isoformat(),
-        'user': user,
-        'matricule': matricule,
-        'field': field,
-        'old_value': str(old_value),
-        'new_value': str(new_value),
-        'reason': reason,
-        'period': st.session_state.current_period,
-        'company': st.session_state.current_company
-    }
-    
-    log_file = log_dir / f"modifications_{datetime.now().strftime('%Y%m')}.jsonl"
-    with open(log_file, 'a', encoding='utf-8') as f:
-        f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
-
-def recalculate_employee_payslip(employee_data: Dict, modifications: Dict) -> Dict:
-    """Recalculate payslip after modifications"""
-
-    # Apply modifications to employee_data
-    updated_data = employee_data.copy()
-    updated_data.update(modifications)
-    
-    # Recalculate
-    calculator = CalculateurPaieMonaco()
-    return calculator.process_employee_payslip(updated_data)
-
 def validation_page():
     """Page de validation des cas particuliers avec édition"""
     st.header("✅ Validation et Modification des Paies")
@@ -1122,110 +1039,6 @@ def validation_page():
                             st.rerun()
                     else:
                         st.success("✅ Déjà validé")
-
-def audit_log_page():
-    """View audit trail of modifications"""
-    st.header("📋 Journal des Modifications")
-    
-    if st.session_state.role != 'admin':
-        st.error("Accès réservé aux administrateurs")
-        return
-    
-    import json
-    from pathlib import Path
-    from datetime import datetime
-    
-    log_dir = Path("data/audit_logs")
-    if not log_dir.exists():
-        st.info("Aucune modification enregistrée")
-        return
-    
-    # Load all logs
-    all_logs = []
-    for log_file in log_dir.glob("*.jsonl"):
-        with open(log_file, 'r', encoding='utf-8') as f:
-            for line in f:
-                try:
-                    all_logs.append(json.loads(line))
-                except:
-                    pass
-    
-    if not all_logs:
-        st.info("Aucune modification enregistrée")
-        return
-    
-    # Convert to DataFrame
-    logs_df = pd.DataFrame(all_logs)
-    logs_df['timestamp'] = pd.to_datetime(logs_df['timestamp'])
-    logs_df = logs_df.sort_values('timestamp', ascending=False)
-    
-    # Filters
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        user_filter = st.selectbox("Utilisateur", ["Tous"] + list(logs_df['user'].unique()))
-    with col2:
-        period_filter = st.selectbox("Période", ["Toutes"] + list(logs_df['period'].unique()))
-    with col3:
-        matricule_filter = st.text_input("Matricule")
-    
-    # Apply filters
-    filtered = logs_df.copy()
-    if user_filter != "Tous":
-        filtered = filtered[filtered['user'] == user_filter]
-    if period_filter != "Toutes":
-        filtered = filtered[filtered['period'] == period_filter]
-    if matricule_filter:
-        filtered = filtered[filtered['matricule'].str.contains(matricule_filter, case=False)]
-    
-    st.metric("Total modifications", len(filtered))
-    
-    # Display
-    st.dataframe(
-        filtered[['timestamp', 'user', 'matricule', 'field', 'old_value', 'new_value', 'reason']],
-        use_container_width=True
-    )
-
-def clean_employee_data_for_pdf(employee_dict: Dict) -> Dict:
-    """Clean employee data to ensure numeric fields are not dicts"""
-    import numpy as np
-    
-    numeric_fields = [
-        'salaire_brut', 'salaire_base', 'salaire_net', 
-        'total_charges_salariales', 'total_charges_patronales',
-        'heures_sup_125', 'heures_sup_150', 'prime',
-        'montant_hs_125', 'montant_hs_150', 'cout_total_employeur',
-        'taux_horaire', 'base_heures', 'heures_payees',
-        'retenue_absence', 'heures_absence', 'indemnite_cp',
-        'heures_jours_feries', 'montant_jours_feries',
-        'cumul_brut', 'cumul_base_ss', 'cumul_net_percu',
-        'cumul_charges_sal', 'cumul_charges_pat',
-        'jours_cp_pris', 'tickets_restaurant'
-    ]
-    
-    cleaned = {}
-    
-    # Copy all fields
-    for key, value in employee_dict.items():
-        if key in numeric_fields:
-            # Force numeric conversion
-            if isinstance(value, dict):
-                cleaned[key] = 0
-            elif isinstance(value, (list, tuple)):
-                cleaned[key] = 0
-            elif pd.isna(value) or value is None:
-                cleaned[key] = 0
-            elif isinstance(value, (int, float, np.integer, np.floating)):
-                cleaned[key] = float(value)
-            else:
-                try:
-                    cleaned[key] = float(value)
-                except (TypeError, ValueError, AttributeError):
-                    cleaned[key] = 0
-        else:
-            # Keep non-numeric fields as-is
-            cleaned[key] = value
-    
-    return cleaned
 
 def pdf_generation_page():
     """Page de génération des PDFs"""
@@ -1597,6 +1410,193 @@ def export_page():
                     st.write(f"- Total net à payer: {df['salaire_net'].sum():,.2f} €")
                 if 'total_charges_patronales' in df.columns:
                     st.write(f"- Charges patronales: {df['total_charges_patronales'].sum():,.2f} €")
+
+# ============================================================================
+# PAYSLIP EDITING HELPERS
+# ============================================================================
+
+def get_salary_rubrics() -> List[Dict]:
+    """Get salary element rubrics from pdf_generation"""
+    from services.pdf_generation import PaystubPDFGenerator
+    codes = PaystubPDFGenerator.RUBRIC_CODES
+    
+    return [
+        {'code': codes['salaire_base'], 'label': 'Salaire Mensuel', 'field': 'salaire_base'},
+        {'code': codes['prime_anciennete'], 'label': "Prime d'ancienneté", 'field': 'prime_anciennete'},
+        {'code': codes['heures_sup_125'], 'label': 'Heures sup. 125%', 'field': 'heures_sup_125'},
+        {'code': codes['heures_sup_150'], 'label': 'Heures sup. 150%', 'field': 'heures_sup_150'},
+        {'code': codes['prime_performance'], 'label': 'Prime performance', 'field': 'prime'},
+        {'code': codes['prime_autre'], 'label': 'Autre prime', 'field': 'prime_autre'},
+        {'code': codes['jours_feries'], 'label': 'Jours fériés 100%', 'field': 'heures_jours_feries'},
+        {'code': codes['absence_maladie'], 'label': 'Absence maladie', 'field': 'heures_absence'},
+        {'code': codes['absence_cp'], 'label': 'Absence congés payés', 'field': 'heures_conges_payes'},
+        {'code': codes['indemnite_cp'], 'label': 'Indemnité congés payés', 'field': 'jours_conges_pris'},
+        {'code': codes['tickets_resto'], 'label': 'Tickets restaurant', 'field': 'tickets_restaurant'},
+    ]
+
+def get_charge_rubrics() -> Dict[str, List[Dict]]:
+    """Get social charge rubrics from payroll_calculations"""
+    from services.payroll_calculations import ChargesSocialesMonaco
+    
+    salariales = []
+    for key, params in ChargesSocialesMonaco.COTISATIONS_SALARIALES.items():
+        salariales.append({
+            'code': key,
+            'label': params['description'],
+            'taux': params['taux'],
+            'plafond': params['plafond']
+        })
+    
+    patronales = []
+    for key, params in ChargesSocialesMonaco.COTISATIONS_PATRONALES.items():
+        patronales.append({
+            'code': key,
+            'label': params['description'],
+            'taux': params['taux'],
+            'plafond': params['plafond']
+        })
+    
+    return {
+        'salariales': salariales,
+        'patronales': patronales
+    }
+
+def log_modification(matricule: str, field: str, old_value, new_value, user: str, reason: str):
+    """Log paystub modification for audit trail"""
+    
+    log_dir = Path("data/audit_logs")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    
+    log_entry = {
+        'timestamp': datetime.now().isoformat(),
+        'user': user,
+        'matricule': matricule,
+        'field': field,
+        'old_value': str(old_value),
+        'new_value': str(new_value),
+        'reason': reason,
+        'period': st.session_state.current_period,
+        'company': st.session_state.current_company
+    }
+    
+    log_file = log_dir / f"modifications_{datetime.now().strftime('%Y%m')}.jsonl"
+    with open(log_file, 'a', encoding='utf-8') as f:
+        f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
+
+def recalculate_employee_payslip(employee_data: Dict, modifications: Dict) -> Dict:
+    """Recalculate payslip after modifications"""
+
+    # Apply modifications to employee_data
+    updated_data = employee_data.copy()
+    updated_data.update(modifications)
+    
+    # Recalculate
+    calculator = CalculateurPaieMonaco()
+    return calculator.process_employee_payslip(updated_data)
+
+def audit_log_page():
+    """View audit trail of modifications"""
+    st.header("📋 Journal des Modifications")
+    
+    if st.session_state.role != 'admin':
+        st.error("Accès réservé aux administrateurs")
+        return
+    
+    import json
+    from pathlib import Path
+    from datetime import datetime
+    
+    log_dir = Path("data/audit_logs")
+    if not log_dir.exists():
+        st.info("Aucune modification enregistrée")
+        return
+    
+    # Load all logs
+    all_logs = []
+    for log_file in log_dir.glob("*.jsonl"):
+        with open(log_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                try:
+                    all_logs.append(json.loads(line))
+                except:
+                    pass
+    
+    if not all_logs:
+        st.info("Aucune modification enregistrée")
+        return
+    
+    # Convert to DataFrame
+    logs_df = pd.DataFrame(all_logs)
+    logs_df['timestamp'] = pd.to_datetime(logs_df['timestamp'])
+    logs_df = logs_df.sort_values('timestamp', ascending=False)
+    
+    # Filters
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        user_filter = st.selectbox("Utilisateur", ["Tous"] + list(logs_df['user'].unique()))
+    with col2:
+        period_filter = st.selectbox("Période", ["Toutes"] + list(logs_df['period'].unique()))
+    with col3:
+        matricule_filter = st.text_input("Matricule")
+    
+    # Apply filters
+    filtered = logs_df.copy()
+    if user_filter != "Tous":
+        filtered = filtered[filtered['user'] == user_filter]
+    if period_filter != "Toutes":
+        filtered = filtered[filtered['period'] == period_filter]
+    if matricule_filter:
+        filtered = filtered[filtered['matricule'].str.contains(matricule_filter, case=False)]
+    
+    st.metric("Total modifications", len(filtered))
+    
+    # Display
+    st.dataframe(
+        filtered[['timestamp', 'user', 'matricule', 'field', 'old_value', 'new_value', 'reason']],
+        use_container_width=True
+    )
+
+def clean_employee_data_for_pdf(employee_dict: Dict) -> Dict:
+    """Clean employee data to ensure numeric fields are not dicts"""
+    import numpy as np
+    
+    numeric_fields = [
+        'salaire_brut', 'salaire_base', 'salaire_net', 
+        'total_charges_salariales', 'total_charges_patronales',
+        'heures_sup_125', 'heures_sup_150', 'prime',
+        'montant_hs_125', 'montant_hs_150', 'cout_total_employeur',
+        'taux_horaire', 'base_heures', 'heures_payees',
+        'retenue_absence', 'heures_absence', 'indemnite_cp',
+        'heures_jours_feries', 'montant_jours_feries',
+        'cumul_brut', 'cumul_base_ss', 'cumul_net_percu',
+        'cumul_charges_sal', 'cumul_charges_pat',
+        'jours_cp_pris', 'tickets_restaurant'
+    ]
+    
+    cleaned = {}
+    
+    # Copy all fields
+    for key, value in employee_dict.items():
+        if key in numeric_fields:
+            # Force numeric conversion
+            if isinstance(value, dict):
+                cleaned[key] = 0
+            elif isinstance(value, (list, tuple)):
+                cleaned[key] = 0
+            elif pd.isna(value) or value is None:
+                cleaned[key] = 0
+            elif isinstance(value, (int, float, np.integer, np.floating)):
+                cleaned[key] = float(value)
+            else:
+                try:
+                    cleaned[key] = float(value)
+                except (TypeError, ValueError, AttributeError):
+                    cleaned[key] = 0
+        else:
+            # Keep non-numeric fields as-is
+            cleaned[key] = value
+    
+    return cleaned
 
 # ============================================================================
 # ADMIN USER MANAGEMENT
