@@ -1842,7 +1842,7 @@ class PDFGeneratorService:
         """
         
         # Ajouter les informations de période
-        period_date = datetime.strptime(period, "%Y-%m")
+        period_date = datetime.strptime(period, "%m-%Y")
         period_start = period_date.replace(day=1).strftime("%d/%m/%Y")
         last_day = calendar.monthrange(period_date.year, period_date.month)[1]
         period_end = period_date.replace(day=last_day).strftime("%d/%m/%Y")
