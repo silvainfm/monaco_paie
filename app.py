@@ -1103,10 +1103,16 @@ def pdf_generation_page():
                 if selected_employee:
                     try:
                         # Extract matricule from selection
+                        # Extract matricule from selection
                         matricule = selected_employee.split(' - ')[0]
-                        employee_data = clean_employee_data_for_pdf(
-                            df[df['matricule'] == matricule].iloc[0].to_dict()
-                        )
+                        employee_mask = df['matricule'] == matricule
+
+                        if not employee_mask.any():
+                            st.error(f"Employee {matricule} not found in data")
+                        else:
+                            employee_data = clean_employee_data_for_pdf(
+                                df[employee_mask].iloc[0].to_dict()
+                            )
                     
                         # Add period information for PDF generation
                         last_day = calendar.monthrange(year, month)[1]
