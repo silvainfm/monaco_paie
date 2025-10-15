@@ -9,6 +9,7 @@ source .venv/bin/activate
 streamlit run app.py
 """
 
+from duckdb import df
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -1103,10 +1104,10 @@ def pdf_generation_page():
                 if selected_employee:
                     try:
                         # Extract matricule from selection
-                        matricule = selected_employee.split(' - ')[0]
-                        employee_mask = df['matricule'] == matricule
+                        matricule = selected_employee.split(' - ')[0].strip()
+                        employee_mask = df['matricule'].astype(str) == str(matricule)
 
-                        if not employee_mask.any():
+                        if employee_mask.sum() == 0:
                             st.error(f"Employee {matricule} not found in data")
                         else:
                             employee_data = clean_employee_data_for_pdf(
