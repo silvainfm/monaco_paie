@@ -1103,7 +1103,6 @@ def pdf_generation_page():
                 if selected_employee:
                     try:
                         # Extract matricule from selection
-                        # Extract matricule from selection
                         matricule = selected_employee.split(' - ')[0]
                         employee_mask = df['matricule'] == matricule
 
@@ -1114,28 +1113,28 @@ def pdf_generation_page():
                                 df[employee_mask].iloc[0].to_dict()
                             )
                     
-                        # Add period information for PDF generation
-                        last_day = calendar.monthrange(year, month)[1]
+                            # Add period information for PDF generation
+                            last_day = calendar.monthrange(year, month)[1]
 
-                        employee_data['period_start'] = f"01/{month:02d}/{year}"
-                        employee_data['period_end'] = f"{last_day:02d}/{month:02d}/{year}"
-                        employee_data['payment_date'] = f"{last_day:02d}/{month:02d}/{year}"
-                        
-                        # Generate PDF
-                        with st.spinner("Génération du bulletin en cours..."):
-                            pdf_buffer = pdf_service.generate_email_ready_paystub(
-                                employee_data, 
-                                f"{month:02d}-{year}"
-                            )
-                        
-                        # Store in session state
-                        st.session_state.generated_pdfs[pdf_key][f'bulletin_{matricule}'] = {
-                            'buffer': pdf_buffer.getvalue(),
-                            'filename': f"bulletin_{matricule}_{year}_{month:02d}.pdf",
-                            'generated_at': datetime.now()
-                        }
-                        
-                        st.success("✅ Bulletin généré avec succès!")
+                            employee_data['period_start'] = f"01/{month:02d}/{year}"
+                            employee_data['period_end'] = f"{last_day:02d}/{month:02d}/{year}"
+                            employee_data['payment_date'] = f"{last_day:02d}/{month:02d}/{year}"
+                            
+                            # Generate PDF
+                            with st.spinner("Génération du bulletin en cours..."):
+                                pdf_buffer = pdf_service.generate_email_ready_paystub(
+                                    employee_data, 
+                                    f"{month:02d}-{year}"
+                                )
+                            
+                            # Store in session state
+                            st.session_state.generated_pdfs[pdf_key][f'bulletin_{matricule}'] = {
+                                'buffer': pdf_buffer.getvalue(),
+                                'filename': f"bulletin_{matricule}_{year}_{month:02d}.pdf",
+                                'generated_at': datetime.now()
+                            }
+                            
+                            st.success("✅ Bulletin généré avec succès!")
                         
                     except Exception as e:
                         st.error(f"Erreur lors de la génération: {str(e)}")
