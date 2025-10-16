@@ -4,6 +4,9 @@ PDF Generation Module for Monaco Payroll System
 Generates paystubs, pay journals, and PTO provision documents
 ===============================================
 Envoyer à l'employeur avant l'employé
+tenir le bulletin sur une page
+agrandir le tableau pour remplir la page
+
 """
 
 from reportlab.lib import colors

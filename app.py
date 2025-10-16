@@ -7,6 +7,11 @@ Version consolidée avec tous les modules intégrés
 source monaco_paie/bin/activate
 source .venv/bin/activate
 streamlit run app.py
+
+modifier que les 2 dernieres paies sauf si nouvelle societe
+
+ajouter un menu en dessous de la validation pour rajouter des lignes dans le bulletin de paie avec un drop down menu des rubriques
+ajouter une ligne de regularisation pour les charges sociales, et base seulement pour les charges
 """
 
 from duckdb import df
