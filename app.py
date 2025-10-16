@@ -910,63 +910,244 @@ def validation_page():
                             else:
                                 st.markdown(f"`{current_value:.2f}`")
                 
-                # TAB 2: SOCIAL CHARGES
+                # TAB 2: SOCIAL CHARGES - COMBINED FORMAT
                 with tab2:
                     st.markdown("##### Cotisations sociales")
-                    st.info("ℹ️ Les charges sont recalculées automatiquement. Modifications manuelles possibles si nécessaire.")
+                    st.info("ℹ️ Modification manuelle des charges. La base est commune pour les parts salariale et patronale.")
                     
-                    charge_rubrics = get_charge_rubrics()
+                    # Get charge definitions
+                    from services.payroll_calculations import ChargesSocialesMonaco
+                    from services.pdf_generation import PaystubPDFGenerator
+                    
                     details_charges = row.get('details_charges', {})
+                    charges_sal = details_charges.get('charges_salariales', {})
+                    charges_pat = details_charges.get('charges_patronales', {})
                     
-                    col1, col2 = st.columns(2)
+                    # Calculate current bases
+                    salaire_brut = safe_get_numeric(row, 'salaire_brut', 0)
+                    plafond_t1 = min(salaire_brut, 3428)
+                    base_t2 = max(0, min(salaire_brut - 3428, 13712 - 3428)) if salaire_brut > 3428 else 0
                     
-                    with col1:
-                        st.markdown("**Charges Salariales**")
-                        charges_sal = details_charges.get('charges_salariales', {})
+                    # Initialize bases storage
+                    bases_key = f"charge_bases_{matricule}"
+                    if bases_key not in st.session_state:
+                        st.session_state[bases_key] = {}
+                    
+                    # Define charges to display in combined format
+                    charges_config = [
+                        {
+                            'code': 'CAR',
+                            'name': 'CAR',
+                            'base_default': salaire_brut,
+                            'taux_sal': 6.85,
+                            'taux_pat': 8.35,
+                            'has_salarial': True,
+                            'has_patronal': True
+                        },
+                        {
+                            'code': 'CCSS',
+                            'name': 'C.C.S.S.',
+                            'base_default': salaire_brut,
+                            'taux_sal': 14.75,
+                            'taux_pat': 0,
+                            'has_salarial': True,
+                            'has_patronal': False
+                        },
+                        {
+                            'code': 'ASSEDIC_T1',
+                            'name': 'Assurance Chômage T1',
+                            'base_default': plafond_t1,
+                            'taux_sal': 2.40,
+                            'taux_pat': 4.05,
+                            'has_salarial': True,
+                            'has_patronal': True
+                        }
+                    ]
+                    
+                    # Add T2 charges if applicable
+                    if base_t2 > 0:
+                        charges_config.extend([
+                            {
+                                'code': 'ASSEDIC_T2',
+                                'name': 'Assurance Chômage T2',
+                                'base_default': base_t2,
+                                'taux_sal': 2.40,
+                                'taux_pat': 4.05,
+                                'has_salarial': True,
+                                'has_patronal': True
+                            },
+                            {
+                                'code': 'CONTRIB_EQUILIBRE_GEN_T2',
+                                'name': 'Contrib. équilibre général T2',
+                                'base_default': base_t2,
+                                'taux_sal': 1.08,
+                                'taux_pat': 1.62,
+                                'has_salarial': True,
+                                'has_patronal': True
+                            },
+                            {
+                                'code': 'RETRAITE_COMP_T2',
+                                'name': 'Retraite comp. unifiée T2',
+                                'base_default': base_t2,
+                                'taux_sal': 8.64,
+                                'taux_pat': 12.95,
+                                'has_salarial': True,
+                                'has_patronal': True
+                            }
+                        ])
+                    
+                    # Add other charges
+                    charges_config.extend([
+                        {
+                            'code': 'CONTRIB_EQUILIBRE_TECH',
+                            'name': 'Contrib. équilibre technique',
+                            'base_default': salaire_brut,
+                            'taux_sal': 0.14,
+                            'taux_pat': 0.21,
+                            'has_salarial': True,
+                            'has_patronal': True
+                        },
+                        {
+                            'code': 'CONTRIB_EQUILIBRE_GEN_T1',
+                            'name': 'Contrib. équilibre général T1',
+                            'base_default': plafond_t1,
+                            'taux_sal': 0.86,
+                            'taux_pat': 1.29,
+                            'has_salarial': True,
+                            'has_patronal': True
+                        },
+                        {
+                            'code': 'RETRAITE_COMP_T1',
+                            'name': 'Retraite comp. unifiée T1',
+                            'base_default': plafond_t1,
+                            'taux_sal': 3.15,
+                            'taux_pat': 4.72,
+                            'has_salarial': True,
+                            'has_patronal': True
+                        },
+                        {
+                            'code': 'CMRC',
+                            'name': 'CMRC',
+                            'base_default': salaire_brut,
+                            'taux_sal': 0,
+                            'taux_pat': 5.22,
+                            'has_salarial': False,
+                            'has_patronal': True
+                        }
+                    ])
+                    
+                    # Create header
+                    st.markdown("---")
+                    col_headers = st.columns([3, 1.5, 1.5, 2, 1.5, 2])
+                    col_headers[0].markdown("**Cotisation**")
+                    col_headers[1].markdown("**Taux Sal.**")
+                    col_headers[2].markdown("**Mont. Sal.**")
+                    col_headers[3].markdown("**Base**")
+                    col_headers[4].markdown("**Taux Pat.**")
+                    col_headers[5].markdown("**Mont. Pat.**")
+                    st.markdown("---")
+                    
+                    # Display each charge line
+                    for charge in charges_config:
+                        cols = st.columns([3, 1.5, 1.5, 2, 1.5, 2])
                         
-                        for charge in charge_rubrics['salariales']:
-                            current = charges_sal.get(charge['code'], 0)
-                            
-                            c1, c2 = st.columns([2, 1])
-                            with c1:
-                                st.markdown(f"**{charge['label']}** `{charge['code']}`")
-                                st.caption(f"Taux: {charge['taux']}% | Plafond: {charge['plafond'] or 'Aucun'}")
-                            with c2:
-                                new_val = st.number_input(
-                                    "€",
-                                    value=float(current),
-                                    step=1.0,
-                                    key=f"charge_sal_{matricule}_{charge['code']}",
-                                    label_visibility="collapsed"
-                                )
-                                if new_val != current:
-                                    if 'charges_salariales' not in st.session_state[mod_key]:
-                                        st.session_state[mod_key]['charges_salariales'] = {}
-                                    st.session_state[mod_key]['charges_salariales'][charge['code']] = new_val
-                    
-                    with col2:
-                        st.markdown("**Charges Patronales**")
-                        charges_pat = details_charges.get('charges_patronales', {})
+                        # Charge name
+                        cols[0].markdown(f"**{charge['name']}**")
+                        cols[0].caption(f"Code: {charge['code']}")
                         
-                        for charge in charge_rubrics['patronales']:
-                            current = charges_pat.get(charge['code'], 0)
-                            
-                            c1, c2 = st.columns([2, 1])
-                            with c1:
-                                st.markdown(f"**{charge['label']}** `{charge['code']}`")
-                                st.caption(f"Taux: {charge['taux']}% | Plafond: {charge['plafond'] or 'Aucun'}")
-                            with c2:
-                                new_val = st.number_input(
-                                    "€",
-                                    value=float(current),
-                                    step=1.0,
-                                    key=f"charge_pat_{matricule}_{charge['code']}",
-                                    label_visibility="collapsed"
-                                )
-                                if new_val != current:
-                                    if 'charges_patronales' not in st.session_state[mod_key]:
-                                        st.session_state[mod_key]['charges_patronales'] = {}
-                                    st.session_state[mod_key]['charges_patronales'][charge['code']] = new_val
+                        # Get current values
+                        current_sal = charges_sal.get(charge['code'], 0)
+                        current_pat = charges_pat.get(charge['code'], 0)
+                        current_base = st.session_state[bases_key].get(
+                            charge['code'], 
+                            charge['base_default']
+                        )
+                        
+                        # Salarial rate (display only)
+                        if charge['has_salarial']:
+                            cols[1].markdown(f"{charge['taux_sal']:.2f}%")
+                        else:
+                            cols[1].markdown("-")
+                        
+                        # Salarial amount (editable)
+                        if charge['has_salarial']:
+                            new_sal = cols[2].number_input(
+                                "Sal",
+                                value=float(current_sal),
+                                step=1.0,
+                                format="%.2f",
+                                key=f"charge_sal_{matricule}_{charge['code']}",
+                                label_visibility="collapsed"
+                            )
+                            if abs(new_sal - current_sal) > 0.01:
+                                if 'charges_salariales' not in st.session_state[mod_key]:
+                                    st.session_state[mod_key]['charges_salariales'] = {}
+                                st.session_state[mod_key]['charges_salariales'][charge['code']] = new_sal
+                        else:
+                            cols[2].markdown("-")
+                        
+                        # Base (editable, shared between salarial and patronal)
+                        new_base = cols[3].number_input(
+                            "Base",
+                            value=float(current_base),
+                            step=100.0,
+                            format="%.2f",
+                            key=f"charge_base_{matricule}_{charge['code']}",
+                            label_visibility="collapsed"
+                        )
+                        if abs(new_base - charge['base_default']) > 0.01:
+                            st.session_state[bases_key][charge['code']] = new_base
+                            # Store base modification
+                            if 'charge_bases' not in st.session_state[mod_key]:
+                                st.session_state[mod_key]['charge_bases'] = {}
+                            st.session_state[mod_key]['charge_bases'][charge['code']] = new_base
+                        
+                        # Patronal rate (display only)
+                        if charge['has_patronal']:
+                            cols[4].markdown(f"{charge['taux_pat']:.2f}%")
+                        else:
+                            cols[4].markdown("-")
+                        
+                        # Patronal amount (editable)
+                        if charge['has_patronal']:
+                            new_pat = cols[5].number_input(
+                                "Pat",
+                                value=float(current_pat),
+                                step=1.0,
+                                format="%.2f",
+                                key=f"charge_pat_{matricule}_{charge['code']}",
+                                label_visibility="collapsed"
+                            )
+                            if abs(new_pat - current_pat) > 0.01:
+                                if 'charges_patronales' not in st.session_state[mod_key]:
+                                    st.session_state[mod_key]['charges_patronales'] = {}
+                                st.session_state[mod_key]['charges_patronales'][charge['code']] = new_pat
+                        else:
+                            cols[5].markdown("-")
+                    
+                    # Totals row
+                    st.markdown("---")
+                    total_cols = st.columns([3, 1.5, 1.5, 2, 1.5, 2])
+                    total_cols[0].markdown("**TOTAL**")
+                    
+                    # Calculate totals from modified values
+                    total_sal = sum(
+                        st.session_state[mod_key].get('charges_salariales', {}).get(
+                            c['code'], 
+                            charges_sal.get(c['code'], 0)
+                        )
+                        for c in charges_config if c['has_salarial']
+                    )
+                    total_pat = sum(
+                        st.session_state[mod_key].get('charges_patronales', {}).get(
+                            c['code'], 
+                            charges_pat.get(c['code'], 0)
+                        )
+                        for c in charges_config if c['has_patronal']
+                    )
+                    
+                    total_cols[2].markdown(f"**{total_sal:.2f}€**")
+                    total_cols[5].markdown(f"**{total_pat:.2f}€**")
                 
                 # Action buttons
                 st.markdown("---")
@@ -1005,11 +1186,23 @@ def validation_page():
                         else:
                             # Log all modifications
                             for field, new_value in st.session_state[mod_key].items():
-                                old_value = row.get(field, None)
-                                log_modification(
-                                    matricule, field, old_value, new_value,
-                                    st.session_state.user, reason
-                                )
+                                if field == 'charge_bases':
+                                    # Log base modifications
+                                    for charge_code, base_value in new_value.items():
+                                        log_modification(
+                                            matricule, 
+                                            f"base_{charge_code}", 
+                                            None, 
+                                            base_value,
+                                            st.session_state.user, 
+                                            reason
+                                        )
+                                else:
+                                    old_value = row.get(field, None)
+                                    log_modification(
+                                        matricule, field, old_value, new_value,
+                                        st.session_state.user, reason
+                                    )
                             
                             # Save to consolidated data
                             month, year = map(int, st.session_state.current_period.split('-'))
@@ -1020,6 +1213,7 @@ def validation_page():
                             st.success("✅ Modifications sauvegardées!")
                             st.session_state[mod_key] = {}
                             st.session_state[edit_key] = False
+                            st.session_state[bases_key] = {}
                             st.rerun()
             
             # VALIDATION BUTTONS (always visible)
