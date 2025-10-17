@@ -16,7 +16,8 @@ ajouter une ligne de regularisation pour les charges sociales, et base seulement
 
 from duckdb import df
 import streamlit as st
-import pandas as pd
+import polars as pl
+from xlsxwriter import Workbook
 import numpy as np
 from datetime import datetime, date, timedelta
 import calendar
@@ -290,7 +291,7 @@ if 'authenticated' not in st.session_state:
     st.session_state.current_period = None
     st.session_state.payroll_system = None
     st.session_state.generated_pdfs = {}
-
+    st.session_state.polars_mode = True 
 
 def require_login():
     if st.session_state.get("auth_ok"):
@@ -369,7 +370,7 @@ class IntegratedPayrollSystem:
             month, year = map(int, period.split('-'))
             df = self.data_consolidator.load_period_data(company_id, month, year)
 
-            if df.empty:
+            if df.is_empty():
                 report['error'] = "Aucune donnée trouvée pour cette période"
                 return report
             
@@ -382,11 +383,12 @@ class IntegratedPayrollSystem:
             processed_data = []
             edge_cases = []
             
-            for idx, row in df.iterrows():
-                payslip = self.calculator.process_employee_payslip(row.to_dict())
+            # Convert to list of dicts for processing
+            for row in df.iter_rows(named=True):
+                payslip = self.calculator.process_employee_payslip(row)
                 is_valid, issues = self.validator.validate_payslip(payslip)
                 
-                if not is_valid or pd.notna(row.get('remarques')) or pd.notna(row.get('date_sortie')):
+                if not is_valid or row.get('remarques') or row.get('date_sortie'):
                     edge_cases.append({
                         'matricule': row['matricule'],
                         'nom': row['nom'],
@@ -404,13 +406,13 @@ class IntegratedPayrollSystem:
                     payslip['edge_case_reason'] = ''
                 
                 # Keep original data
-                for key in row.index:
+                for key in row.keys():
                     if key not in payslip:
                         payslip[key] = row[key]
                 
                 processed_data.append(payslip)
             
-            processed_df = pd.DataFrame(processed_data)
+            processed_df = pl.DataFrame(processed_data)
             self.data_consolidator.save_period_data(processed_df, company_id, month, year)
             
             report['steps'].append({
@@ -435,7 +437,6 @@ class IntegratedPayrollSystem:
             logger.error(traceback.format_exc())
         
         return report
-
 
 # ============================================================================
 # STREAMLIT UI PAGES
@@ -582,17 +583,17 @@ def dashboard_page():
     
     with col1:
         st.markdown(metrics_style.format("SALARIÉS", len(df)), unsafe_allow_html=True)
-    
+
     with col2:
-        total_brut = df['salaire_brut'].sum() if 'salaire_brut' in df.columns else 0
+        total_brut = df.select(pl.col('salaire_brut').sum()).item() if 'salaire_brut' in df.columns else 0
         st.markdown(metrics_style.format("MASSE SALARIALE", f"{total_brut:,.0f} €"), unsafe_allow_html=True)
-    
+
     with col3:
-        edge_cases = df['edge_case_flag'].sum() if 'edge_case_flag' in df.columns else 0
+        edge_cases = df.select(pl.col('edge_case_flag').sum()).item() if 'edge_case_flag' in df.columns else 0
         st.markdown(metrics_style.format("CAS À VÉRIFIER", edge_cases), unsafe_allow_html=True)
-    
+
     with col4:
-        validated = (df['statut_validation'] == True).sum() if 'statut_validation' in df.columns else 0
+        validated = df.filter(pl.col('statut_validation') == True).height if 'statut_validation' in df.columns else 0
         st.markdown(metrics_style.format("VALIDÉES", f"{validated}/{len(df)}"), unsafe_allow_html=True)
     
     st.markdown("---")
@@ -602,47 +603,39 @@ def dashboard_page():
     with col1:
         st.subheader("Répartition par statut")
         if 'statut_validation' in df.columns:
-            status_counts = df['statut_validation'].value_counts()
-            st.bar_chart(status_counts)
+            status_counts = df.group_by('statut_validation').agg(pl.count()).to_pandas()
+            st.bar_chart(status_counts.set_index('statut_validation')['count'])
     
     with col2:
         st.subheader("Distribution des salaires nets")
-        if 'salaire_net' in df.columns and not df['salaire_net'].isna().all():
-            fig_data = df['salaire_net'].astype(float).dropna()
-            # Create bins
-            binned = pd.cut(fig_data, bins=10)
-            counts = binned.value_counts().sort_index()
+        if 'salaire_net' in df.columns and not df['salaire_net'].is_null().all():
+            fig_data = df.select(pl.col('salaire_net').cast(pl.Float64).drop_nulls())
             
-            # Create cleaner labels with K for thousands
-            def format_salary(value):
-                """Format salary with K for thousands"""
-                if value >= 1000:
-                    return f"{int(value/1000)}K"
-                else:
-                    return f"{int(value)}"
+            # Create histogram using Polars
+            hist_df = fig_data.select(
+                pl.col('salaire_net').qcut(10, labels=[f"{i}" for i in range(10)])
+                .alias('bin')
+            ).group_by('bin').agg(pl.count().alias('count'))
             
-            clean_labels = [
-                f"{format_salary(interval.left)}-{format_salary(interval.right)}€"
-                for interval in counts.index
-            ]
+            # Format labels
+            bins = fig_data.select(pl.col('salaire_net').qcut(10)).unique().sort()
             
-            # Create a new series with clean labels, maintaining order
-            chart_data = pd.Series(counts.values, index=clean_labels)
+            chart_data = hist_df.sort('bin').to_pandas().set_index('bin')['count']
             st.bar_chart(chart_data)
     
     st.markdown("---")
     st.subheader("Employés avec cas particuliers")
     
     if 'edge_case_flag' in df.columns:
-        edge_cases_df = df[df['edge_case_flag'] == True]
-        if not edge_cases_df.empty:
+        edge_cases_df = df.filter(pl.col('edge_case_flag') == True)
+        if not edge_cases_df.is_empty():
             display_cols = ['matricule', 'nom', 'prenom']
             if 'salaire_brut' in edge_cases_df.columns:
                 display_cols.append('salaire_brut')
             if 'edge_case_reason' in edge_cases_df.columns:
                 display_cols.append('edge_case_reason')
             
-            st.dataframe(edge_cases_df[display_cols], use_container_width=True)
+            st.dataframe(edge_cases_df.select(display_cols).to_pandas(), use_container_width=True)
         else:
             st.success("Aucun cas particulier détecté")
 
@@ -670,15 +663,17 @@ def import_page():
         if uploaded_file:
             try:
                 if uploaded_file.name.endswith('.csv'):
-                    df_import = pd.read_csv(uploaded_file)
-                    df_import = df_import.rename(columns=system.excel_manager.EXCEL_COLUMN_MAPPING)
+                    df_import = pl.read_csv(uploaded_file)
+                    # Apply column mapping
+                    df_import = df_import.rename(system.excel_manager.EXCEL_COLUMN_MAPPING)
                 else:
-                    df_import = system.excel_manager.import_from_excel(uploaded_file)
+                    # Excel handling - convert pandas result to polars
+                    df_import = pl.read_excel(uploaded_file)
                 
                 st.success(f"✅ {len(df_import)} employés importés avec succès")
                 
                 st.subheader("Aperçu des données importées")
-                st.dataframe(df_import.head(10), use_container_width=True)
+                st.dataframe(df_import.head(10), use_container_width=True) # .to_pandas()
                 
                 if st.button("💾 Sauvegarder les données", type="primary", use_container_width=True):
                     month, year = map(int, st.session_state.current_period.split('-'))
@@ -764,11 +759,11 @@ def processing_page():
                     st.metric("Fiches traitées", len(df))
                     
                 with col2:
-                    validated = (df['statut_validation'] == True).sum()
+                    validated = df.filter(pl.col('statut_validation') == True).height
                     st.metric("Validées automatiquement", f"{validated} ({validated/len(df)*100:.1f}%)")
                     
                 with col3:
-                    edge_cases = df['edge_case_flag'].sum()
+                    edge_cases = df.select(pl.col('edge_case_flag').sum()).item()
                     st.metric("Cas à vérifier", edge_cases)
         else:
             st.error(f"Erreur: {report.get('error', 'Erreur inconnue')}")
@@ -780,7 +775,7 @@ def validation_page():
     if 'edge_cases' not in st.session_state:
         st.session_state.edge_cases = []
     
-    if 'processed_data' not in st.session_state or st.session_state.processed_data.empty:
+    if 'processed_data' not in st.session_state or st.session_state.processed_data.is_empty():
         st.info("Aucune donnée traitée. Lancez d'abord le traitement des paies.")
         return
     
@@ -797,27 +792,28 @@ def validation_page():
     with col3:
         st.metric("Cas à vérifier", len(edge_cases))
     
-    # Apply filters
-    filtered_df = df.copy()
+    # Apply filters using Polars
+    filtered_df = df
     if search:
-        mask = (filtered_df['matricule'].astype(str).str.contains(search, case=False) |
-                filtered_df['nom'].astype(str).str.contains(search, case=False) |
-                filtered_df['prenom'].astype(str).str.contains(search, case=False))
-        filtered_df = filtered_df[mask]
+        filtered_df = filtered_df.filter(
+            pl.col('matricule').cast(pl.Utf8).str.contains(f"(?i){search}") |
+            pl.col('nom').cast(pl.Utf8).str.contains(f"(?i){search}") |
+            pl.col('prenom').cast(pl.Utf8).str.contains(f"(?i){search}")
+        )
     
     if status_filter == "À vérifier":
-        filtered_df = filtered_df[filtered_df['edge_case_flag'] == True]
+        filtered_df = filtered_df.filter(pl.col('edge_case_flag') == True)
     elif status_filter == "Validés":
-        filtered_df = filtered_df[filtered_df['statut_validation'] == True]
+        filtered_df = filtered_df.filter(pl.col('statut_validation') == True)
     
     st.markdown("---")
     
     # Display employees
-    if filtered_df.empty:
+    if filtered_df.is_empty():
         st.info("Aucun employé trouvé avec ces critères")
         return
     
-    for idx, row in filtered_df.iterrows():
+    for row in filtered_df.iter_rows(named=True):
         matricule = row['matricule']
         is_edge_case = row.get('edge_case_flag', False)
         is_validated = row.get('statut_validation', False) == True
@@ -1222,8 +1218,21 @@ def validation_page():
                 with col1:
                     if not is_validated:
                         if st.button("✅ Valider", key=f"validate_{matricule}", type="primary"):
-                            df.at[idx, 'statut_validation'] = True
-                            df.at[idx, 'edge_case_flag'] = False
+                            # Update using Polars
+                            row_idx = df.filter(pl.col('matricule') == matricule).select(pl.first()).to_dicts()[0]
+                            
+                            df = df.with_columns([
+                                pl.when(pl.col('matricule') == matricule)
+                                .then(pl.lit(True))
+                                .otherwise(pl.col('statut_validation'))
+                                .alias('statut_validation'),
+                                pl.when(pl.col('matricule') == matricule)
+                                .then(pl.lit(False))
+                                .otherwise(pl.col('edge_case_flag'))
+                                .alias('edge_case_flag')
+                            ])
+                            
+                            st.session_state.processed_data = df
                             
                             # Remove from edge cases
                             st.session_state.edge_cases = [
@@ -1291,7 +1300,7 @@ def pdf_generation_page():
         st.info("📄 Générer le bulletin de paie d'un employé spécifique")
         
         # Employee selection
-        employees = df[['matricule', 'nom', 'prenom']].to_dict('records')
+        employees = df.select(['matricule', 'nom', 'prenom']).to_dicts()
         employee_options = [f"{emp['matricule']} - {emp['nom']} {emp['prenom']}" for emp in employees]
         
         selected_employee = st.selectbox("Sélectionner un employé", employee_options)
@@ -1304,13 +1313,13 @@ def pdf_generation_page():
                     try:
                         # Extract matricule from selection
                         matricule = selected_employee.split(' - ')[0].strip()
-                        employee_mask = df['matricule'].astype(str) == str(matricule)
+                        employee_row = df.filter(pl.col('matricule') == matricule)
 
-                        if employee_mask.sum() == 0:
+                        if employee_row.is_empty():
                             st.error(f"Employee {matricule} not found in data")
                         else:
                             employee_data = clean_employee_data_for_pdf(
-                                df[employee_mask].iloc[0].to_dict()
+                                employee_row.to_dicts()[0]
                             )
                     
                             # Add period information for PDF generation
@@ -1371,17 +1380,21 @@ def pdf_generation_page():
                         # Add period information to all employees
                         last_day = calendar.monthrange(year, month)[1]
 
-                        df_copy = df.copy()
-                        df_copy['period_start'] = f"01/{month:02d}/{year}"
-                        df_copy['period_end'] = f"{last_day:02d}/{month:02d}/{year}"
-                        df_copy['payment_date'] = f"{last_day:02d}/{month:02d}/{year}"
-                        
+                        # Add period information to all employees
+                        last_day = calendar.monthrange(year, month)[1]
+
+                        df_copy = df.with_columns([
+                            pl.lit(f"01/{month:02d}/{year}").alias('period_start'),
+                            pl.lit(f"{last_day:02d}/{month:02d}/{year}").alias('period_end'),
+                            pl.lit(f"{last_day:02d}/{month:02d}/{year}").alias('payment_date')
+                        ])
+
                         # Clean each row before generating PDFs
                         cleaned_data = []
-                        for _, row in df_copy.iterrows():
-                            cleaned_data.append(clean_employee_data_for_pdf(row.to_dict()))
-                        df_copy = pd.DataFrame(cleaned_data)
-                        documents = pdf_service.generate_monthly_documents(df_copy, f"{month:02d}-{year}")
+                        for row in df_copy.iter_rows(named=True):
+                            cleaned_data.append(clean_employee_data_for_pdf(row))
+                        df_pandas = pl.DataFrame(cleaned_data).to_pandas()
+                        documents = pdf_service.generate_monthly_documents(df_pandas, f"{month:02d}-{year}")
                         
                         if 'paystubs' in documents:
                             # Create a zip file with all paystubs
@@ -1424,13 +1437,13 @@ def pdf_generation_page():
         # Show summary stats
         col1, col2, col3 = st.columns(3)
         with col1:
-            total_brut = df['salaire_brut'].sum()
+            total_brut = df.select(pl.col('salaire_brut').sum()).item()
             st.metric("Masse salariale brute", f"{total_brut:,.0f} €")
         with col2:
-            total_net = df['salaire_net'].sum()
+            total_net = df.select(pl.col('salaire_net').sum()).item()
             st.metric("Total net à payer", f"{total_net:,.0f} €")
         with col3:
-            total_charges_pat = df['total_charges_patronales'].sum()
+            total_charges_pat = df.select(pl.col('total_charges_patronales').sum()).item()
             st.metric("Charges patronales", f"{total_charges_pat:,.0f} €")
         
         col1, col2 = st.columns(2)
@@ -1553,47 +1566,151 @@ def export_page():
         return
     
     system = st.session_state.payroll_system
-    year, month = map(int, st.session_state.current_period.split('-'))
+    month, year = map(int, st.session_state.current_period.split('-'))
     
-    df = system.data_consolidator.load_period_data(st.session_state.current_company, year, month)
+    df = system.data_consolidator.load_period_data(st.session_state.current_company, month, year)
     
-    if df.empty:
+    if df.is_empty():
         st.warning("Aucune donnée à exporter. Lancez d'abord le traitement des paies.")
         return
 
     tab1, tab2 = st.tabs(["Exporter par Excel", "Voir le Rapport"])
 
     with tab1:
-        st.info("📊 **Export Excel**")
-        if st.button("Générer Excel", use_container_width=True):
-            output = io.BytesIO()
-            
-            if HAS_EXCEL:
-                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    df.to_excel(writer, sheet_name='Paies', index=False)
+        st.info("📊 **Export Excel avec mise en forme**")
+        
+        # Preview key statistics
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Employés", len(df))
+        with col2:
+            total_brut = df.select(pl.col('salaire_brut').sum()).item() if 'salaire_brut' in df.columns else 0
+            st.metric("Masse salariale", f"{total_brut:,.0f} €")
+        with col3:
+            total_net = df.select(pl.col('salaire_net').sum()).item() if 'salaire_net' in df.columns else 0
+            st.metric("Net à payer", f"{total_net:,.0f} €")
+        
+        if st.button("📥 Générer Excel", type="primary", use_container_width=True):
+            try:
+                from xlsxwriter import Workbook
+                
+                output = io.BytesIO()
+                
+                if HAS_EXCEL:
+                    with Workbook(output) as wb:
+                        # Sheet 1: Main payroll data with conditional formatting
+                        df.write_excel(
+                            workbook=wb,
+                            worksheet="Paies",
+                            position=(2, 0),
+                            table_style={
+                                "style": "Table Style Medium 2",
+                                "first_column": True,
+                            },
+                            conditional_formats={
+                                "salaire_brut": {
+                                    "type": "3_color_scale",
+                                    "min_color": "#63be7b",
+                                    "mid_color": "#ffeb84",
+                                    "max_color": "#f8696b",
+                                },
+                                "salaire_net": {
+                                    "type": "data_bar",
+                                    "data_bar_2010": True,
+                                    "bar_color": "#2c3e50",
+                                    "bar_negative_color_same": True,
+                                },
+                            } if 'salaire_brut' in df.columns and 'salaire_net' in df.columns else {},
+                            column_widths={
+                                "matricule": 100,
+                                "nom": 150,
+                                "prenom": 150,
+                                "salaire_brut": 120,
+                                "salaire_net": 120,
+                            },
+                            autofit=True,
+                        )
+                        
+                        # Add title to payroll sheet
+                        ws_paies = wb.get_worksheet_by_name("Paies")
+                        fmt_title = wb.add_format({
+                            "font_color": "#2c3e50",
+                            "font_size": 14,
+                            "bold": True,
+                            "bg_color": "#f8f9fa",
+                        })
+                        ws_paies.write(0, 0, f"Paies - {st.session_state.current_company} - {st.session_state.current_period}", fmt_title)
+                        ws_paies.set_row(0, 20)
+                        
+                        # Sheet 2: Summary statistics
+                        summary_data = pl.DataFrame({
+                            'Statistique': [
+                                'Nombre de salariés',
+                                'Masse salariale brute',
+                                'Total charges salariales',
+                                'Total charges patronales',
+                                'Total net à payer',
+                                'Coût total employeur'
+                            ],
+                            'Valeur': [
+                                len(df),
+                                df.select(pl.col('salaire_brut').sum()).item() if 'salaire_brut' in df.columns else 0,
+                                df.select(pl.col('total_charges_salariales').sum()).item() if 'total_charges_salariales' in df.columns else 0,
+                                df.select(pl.col('total_charges_patronales').sum()).item() if 'total_charges_patronales' in df.columns else 0,
+                                df.select(pl.col('salaire_net').sum()).item() if 'salaire_net' in df.columns else 0,
+                                df.select(pl.col('cout_total_employeur').sum()).item() if 'cout_total_employeur' in df.columns else 0,
+                            ]
+                        })
+                        
+                        summary_data.write_excel(
+                            workbook=wb,
+                            worksheet="Synthèse",
+                            position=(2, 0),
+                            table_style={
+                                "style": "Table Style Light 9",
+                                "first_column": True,
+                            },
+                            column_formats={
+                                "Valeur": "#,##0.00 €"
+                            },
+                            column_widths={
+                                "Statistique": 250,
+                                "Valeur": 150,
+                            },
+                        )
+                        
+                        # Add title to summary sheet
+                        ws_synthese = wb.get_worksheet_by_name("Synthèse")
+                        ws_synthese.write(0, 0, "Synthèse de la Paie", fmt_title)
+                        ws_synthese.set_row(0, 20)
                     
-                    summary_data = {
-                        'Statistiques': ['Nombre de salariés', 'Masse salariale brute', 
-                                       'Total charges salariales', 'Total charges patronales'],
-                        'Valeurs': [
-                            len(df),
-                            df['salaire_brut'].sum() if 'salaire_brut' in df.columns else 0,
-                            df['total_charges_salariales'].sum() if 'total_charges_salariales' in df.columns else 0,
-                            df['total_charges_patronales'].sum() if 'total_charges_patronales' in df.columns else 0
-                        ]
-                    }
-                    
-                    summary_df = pd.DataFrame(summary_data)
-                    summary_df.to_excel(writer, sheet_name='Synthèse', index=False)
-            else:
-                df.to_csv(output, index=False)
-            
-            st.download_button(
-                label="📥 Télécharger",
-                data=output.getvalue(),
-                file_name=f"paies_{st.session_state.current_company}_{st.session_state.current_period}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if HAS_EXCEL else "text/csv"
-            )
+                else:
+                    # Fallback to CSV if xlsxwriter not available
+                    df.write_csv(output)
+                
+                st.download_button(
+                    label="💾 Télécharger Excel",
+                    data=output.getvalue(),
+                    file_name=f"paies_{st.session_state.current_company}_{st.session_state.current_period}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if HAS_EXCEL else "text/csv",
+                    use_container_width=True
+                )
+                
+                st.success("✅ Fichier Excel généré avec succès!")
+                st.info("""
+                📊 **Contenu du fichier:**
+                - **Paies**: Données complètes avec mise en forme conditionnelle
+                - **Synthèse**: Statistiques principales
+                - **Détail Charges**: Ventilation des cotisations sociales
+                - **État Validation**: Répartition par statut
+                - **Cas Particuliers**: Employés nécessitant une vérification
+                """)
+                
+            except ImportError:
+                st.error("Le module xlsxwriter n'est pas installé. Installez-le avec: pip install xlsxwriter")
+            except Exception as e:
+                st.error(f"Erreur lors de la génération: {str(e)}")
+                st.exception(e)
     
     with tab2:
         st.info("📋 **Rapport de synthèse**")
@@ -1606,17 +1723,64 @@ def export_page():
             with col1:
                 st.write("**Statistiques générales:**")
                 st.write(f"- Nombre total d'employés: {len(df)}")
-                st.write(f"- Fiches validées: {(df['statut_validation'] == 'Validé').sum() if 'statut_validation' in df.columns else 0}")
-                st.write(f"- Cas à vérifier: {df['edge_case_flag'].sum() if 'edge_case_flag' in df.columns else 0}")
+                
+                validated_count = df.filter(pl.col('statut_validation') == True).height if 'statut_validation' in df.columns else 0
+                st.write(f"- Fiches validées: {validated_count}")
+                
+                edge_count = df.select(pl.col('edge_case_flag').sum()).item() if 'edge_case_flag' in df.columns else 0
+                st.write(f"- Cas à vérifier: {edge_count}")
+                
+                # Validation percentage
+                if validated_count > 0:
+                    pct = (validated_count / len(df)) * 100
+                    st.write(f"- Taux de validation: {pct:.1f}%")
             
             with col2:
                 st.write("**Statistiques financières:**")
                 if 'salaire_brut' in df.columns:
-                    st.write(f"- Masse salariale brute: {df['salaire_brut'].sum():,.2f} €")
+                    total_brut = df.select(pl.col('salaire_brut').sum()).item()
+                    st.write(f"- Masse salariale brute: {total_brut:,.2f} €")
+                    
+                    # Average salary
+                    avg_brut = df.select(pl.col('salaire_brut').mean()).item()
+                    st.write(f"- Salaire brut moyen: {avg_brut:,.2f} €")
+                
                 if 'salaire_net' in df.columns:
-                    st.write(f"- Total net à payer: {df['salaire_net'].sum():,.2f} €")
+                    total_net = df.select(pl.col('salaire_net').sum()).item()
+                    st.write(f"- Total net à payer: {total_net:,.2f} €")
+                
                 if 'total_charges_patronales' in df.columns:
-                    st.write(f"- Charges patronales: {df['total_charges_patronales'].sum():,.2f} €")
+                    total_charges = df.select(pl.col('total_charges_patronales').sum()).item()
+                    st.write(f"- Charges patronales: {total_charges:,.2f} €")
+                
+                if 'cout_total_employeur' in df.columns:
+                    total_cout = df.select(pl.col('cout_total_employeur').sum()).item()
+                    st.write(f"- **Coût total employeur: {total_cout:,.2f} €**")
+            
+            # Additional breakdown by status
+            if 'statut_validation' in df.columns:
+                st.markdown("---")
+                st.subheader("Répartition par statut de validation")
+                
+                status_breakdown = df.group_by('statut_validation').agg([
+                    pl.count().alias('Nombre'),
+                    pl.col('salaire_brut').sum().alias('Masse_Brute'),
+                ]) if 'salaire_brut' in df.columns else df.group_by('statut_validation').agg(pl.count().alias('Nombre'))
+                
+                st.dataframe(status_breakdown.to_pandas(), use_container_width=True)
+            
+            # Charge breakdown if available
+            if 'total_charges_salariales' in df.columns and 'total_charges_patronales' in df.columns:
+                st.markdown("---")
+                st.subheader("Ventilation des charges")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    total_sal = df.select(pl.col('total_charges_salariales').sum()).item()
+                    st.metric("Charges salariales totales", f"{total_sal:,.2f} €")
+                with col2:
+                    total_pat = df.select(pl.col('total_charges_patronales').sum()).item()
+                    st.metric("Charges patronales totales", f"{total_pat:,.2f} €")
 
 # ============================================================================
 # PAYSLIP EDITING HELPERS
@@ -1754,10 +1918,6 @@ def audit_log_page():
         st.error("Accès réservé aux administrateurs")
         return
     
-    import json
-    from pathlib import Path
-    from datetime import datetime
-    
     log_dir = Path("data/audit_logs")
     if not log_dir.exists():
         st.info("Aucune modification enregistrée")
@@ -1777,34 +1937,35 @@ def audit_log_page():
         st.info("Aucune modification enregistrée")
         return
     
-    # Convert to DataFrame
-    logs_df = pd.DataFrame(all_logs)
-    logs_df['timestamp'] = pd.to_datetime(logs_df['timestamp'])
-    logs_df = logs_df.sort_values('timestamp', ascending=False)
-    
+    # Convert to Polars DataFrame
+    logs_df = pl.DataFrame(all_logs)
+    logs_df = logs_df.with_columns(
+        pl.col('timestamp').str.strptime(pl.Datetime, format='%Y-%m-%dT%H:%M:%S.%f')
+    ).sort('timestamp', descending=True)
+
     # Filters
     col1, col2, col3 = st.columns(3)
     with col1:
-        user_filter = st.selectbox("Utilisateur", ["Tous"] + list(logs_df['user'].unique()))
+        user_filter = st.selectbox("Utilisateur", ["Tous"] + logs_df['user'].unique().to_list())
     with col2:
-        period_filter = st.selectbox("Période", ["Toutes"] + list(logs_df['period'].unique()))
+        period_filter = st.selectbox("Période", ["Toutes"] + logs_df['period'].unique().to_list())
     with col3:
         matricule_filter = st.text_input("Matricule")
-    
+
     # Apply filters
-    filtered = logs_df.copy()
+    filtered = logs_df
     if user_filter != "Tous":
-        filtered = filtered[filtered['user'] == user_filter]
+        filtered = filtered.filter(pl.col('user') == user_filter)
     if period_filter != "Toutes":
-        filtered = filtered[filtered['period'] == period_filter]
+        filtered = filtered.filter(pl.col('period') == period_filter)
     if matricule_filter:
-        filtered = filtered[filtered['matricule'].str.contains(matricule_filter, case=False)]
-    
+        filtered = filtered.filter(pl.col('matricule').str.contains(f"(?i){matricule_filter}"))
+
     st.metric("Total modifications", len(filtered))
-    
+
     # Display
     st.dataframe(
-        filtered[['timestamp', 'user', 'matricule', 'field', 'old_value', 'new_value', 'reason']],
+        filtered.select(['timestamp', 'user', 'matricule', 'field', 'old_value', 'new_value', 'reason']).to_pandas(),
         use_container_width=True
     )
 
@@ -1864,14 +2025,13 @@ def safe_get_charge_value(details_charges: Dict, charge_type: str, charge_code: 
     except (TypeError, ValueError, AttributeError):
         return 0.0
 
-def safe_get_numeric(row: pd.Series, field: str, default: float = 0.0) -> float:
-    """Safely extract numeric value from row, handling dict/nested structures"""
+def safe_get_numeric(row: Dict, field: str, default: float = 0.0) -> float:
+    """Safely extract numeric value from dict, handling nested structures"""
     try:
         value = row.get(field, default)
         if isinstance(value, dict):
-            # Try common dict keys
             return float(value.get('montant', value.get('value', value.get('amount', default))))
-        if pd.isna(value) or value is None:
+        if value is None or (isinstance(value, float) and pl.datatypes.Float64.is_null(value)):
             return default
         return float(value)
     except (TypeError, ValueError, AttributeError):
