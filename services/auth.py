@@ -11,16 +11,12 @@ import logging
 from pathlib import Path
 from typing import Optional, Dict, List
 from datetime import datetime
-import pandas as pd
+import polars as pl
 import bcrypt
+import pyarrow as pa
+import pyarrow.parquet as pq
+HAS_PYARROW = True
 
-# Try to import pyarrow, fallback to pickle
-try:
-    import pyarrow as pa
-    import pyarrow.parquet as pq
-    HAS_PYARROW = True
-except ImportError:
-    HAS_PYARROW = False
 
 # Configuration
 USERS_FILE = Path('data/users.parquet')
@@ -47,14 +43,12 @@ def _acquire_lock(timeout: float = LOCK_TIMEOUT):
                 raise TimeoutError(f"Could not acquire lock after {timeout}s")
             time.sleep(0.05)
 
-
 def _release_lock():
     """Release file lock"""
     try:
         LOCK_FILE.unlink(missing_ok=True)
     except Exception as e:
         logger.warning(f"Error releasing lock: {e}")
-
 
 class AuthManager:
     """
@@ -66,11 +60,21 @@ class AuthManager:
     """
 
     @staticmethod
-    def _empty_df() -> pd.DataFrame:
+    def _empty_df() -> pl.DataFrame:
         """Create empty DataFrame with correct schema"""
-        return pd.DataFrame(columns=[
-            "username", "name", "role", "created_at", "hash_bcrypt"
-        ])
+        return pl.DataFrame({
+            "username": [],
+            "name": [],
+            "role": [],
+            "created_at": [],
+            "hash_bcrypt": []
+        }, schema={
+            "username": pl.Utf8,
+            "name": pl.Utf8,
+            "role": pl.Utf8,
+            "created_at": pl.Utf8,
+            "hash_bcrypt": pl.Utf8
+        })
 
     @staticmethod
     def _ensure_store():
@@ -78,30 +82,22 @@ class AuthManager:
         USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
-    def _load_df() -> pd.DataFrame:
+    def _load_df() -> pl.DataFrame:
         """Load users DataFrame from storage"""
         AuthManager._ensure_store()
         
-        # Try parquet first
         if USERS_FILE.exists() and HAS_PYARROW:
-            return pd.read_parquet(USERS_FILE)
-        
-        # Try pickle fallback
-        pkl_file = USERS_FILE.with_suffix(".pkl")
-        if pkl_file.exists():
-            return pd.read_pickle(pkl_file)
+            return pl.read_parquet(USERS_FILE)
         
         return AuthManager._empty_df()
 
     @staticmethod
-    def _save_df(df: pd.DataFrame):
+    def _save_df(df: pl.DataFrame):
         """Save users DataFrame to storage with locking"""
         _acquire_lock()
         try:
             if HAS_PYARROW:
                 df.to_parquet(USERS_FILE, index=False)
-            else:
-                df.to_pickle(USERS_FILE.with_suffix(".pkl"))
         finally:
             _release_lock()
 
@@ -138,16 +134,16 @@ class AuthManager:
         """
         try:
             df = AuthManager._load_df()
-            user_row = df[df["username"] == username]
+            user_row = df.filter(pl.col("username") == username)
             
-            if user_row.empty:
+            if user_row.height == 0:
                 return None
                 
-            user_data = user_row.iloc[0]
+            user_data = user_row.row(0, named=True)
             hash_value = user_data["hash_bcrypt"]
             
             # Handle missing or invalid hash
-            if pd.isna(hash_value) or not hash_value:
+            if hash_value is None or not hash_value:
                 logger.warning(f"No password hash for user: {username}")
                 return None
             
@@ -160,11 +156,11 @@ class AuthManager:
                 }
             
             return None
-            
+        
         except Exception as e:
             logger.error(f"Error verifying user {username}: {e}")
             return None
-
+        
     @staticmethod
     def add_or_update_user(username: str, password: str, role: str = "comptable", name: str = ""):
         """
@@ -191,21 +187,35 @@ class AuthManager:
             hash_value = AuthManager.hash_password(password)
             
             # Check if user exists
-            if (df["username"] == username).any():
+            user_exists = df.filter(pl.col("username") == username).height > 0
+            
+            if user_exists:
                 # Update existing user
-                mask = df["username"] == username
-                df.loc[mask, ["name", "role", "hash_bcrypt"]] = [name, role, hash_value]
+                df = df.with_columns([
+                    pl.when(pl.col("username") == username)
+                    .then(pl.lit(name))
+                    .otherwise(pl.col("name"))
+                    .alias("name"),
+                    pl.when(pl.col("username") == username)
+                    .then(pl.lit(role))
+                    .otherwise(pl.col("role"))
+                    .alias("role"),
+                    pl.when(pl.col("username") == username)
+                    .then(pl.lit(hash_value))
+                    .otherwise(pl.col("hash_bcrypt"))
+                    .alias("hash_bcrypt")
+                ])
                 logger.info(f"Updated user: {username}")
             else:
                 # Add new user
-                new_user = pd.DataFrame([{
-                    "username": username,
-                    "name": name,
-                    "role": role,
-                    "created_at": now,
-                    "hash_bcrypt": hash_value
-                }])
-                df = pd.concat([df, new_user], ignore_index=True)
+                new_user = pl.DataFrame({
+                    "username": [username],
+                    "name": [name],
+                    "role": [role],
+                    "created_at": [now],
+                    "hash_bcrypt": [hash_value]
+                })
+                df = pl.concat([df, new_user])
                 logger.info(f"Added new user: {username}")
             
             AuthManager._save_df(df)
@@ -226,7 +236,7 @@ class AuthManager:
             df = AuthManager._load_df()
             users = []
             
-            for _, user in df.iterrows():
+            for user in df.iter_rows(named=True):
                 users.append({
                     "username": user["username"],
                     "name": user["name"],
@@ -253,10 +263,10 @@ class AuthManager:
         
         try:
             df = AuthManager._load_df()
-            original_count = len(df)
+            original_count = df.height
             
-            df = df[~df["username"].isin(usernames)]
-            removed_count = original_count - len(df)
+            df = df.filter(~pl.col("username").is_in(usernames))
+            removed_count = original_count - df.height
             
             AuthManager._save_df(df)
             logger.info(f"Removed {removed_count} users")
@@ -270,7 +280,7 @@ class AuthManager:
         """Check if user exists"""
         try:
             df = AuthManager._load_df()
-            return (df["username"] == username).any()
+            return df.filter(pl.col("username") == username).height > 0
         except Exception as e:
             logger.error(f"Error checking user existence: {e}")
             return False
@@ -314,12 +324,12 @@ class AuthManager:
         """Get user information without authentication"""
         try:
             df = AuthManager._load_df()
-            user_row = df[df["username"] == username]
+            user_row = df.filter(pl.col("username") == username)
             
-            if user_row.empty:
+            if user_row.height == 0:
                 return None
                 
-            user_data = user_row.iloc[0]
+            user_data = user_row.row(0, named=True)
             return {
                 "username": username,
                 "name": user_data["name"],
@@ -374,7 +384,7 @@ class AuthManager:
         """Get user statistics"""
         try:
             df = AuthManager._load_df()
-            total_users = len(df)
+            total_users = df.height
             
             if total_users == 0:
                 return {
@@ -383,8 +393,8 @@ class AuthManager:
                     "comptable_users": 0
                 }
             
-            admin_users = len(df[df["role"] == "admin"])
-            comptable_users = len(df[df["role"] == "comptable"])
+            admin_users = df.filter(pl.col("role") == "admin").height
+            comptable_users = df.filter(pl.col("role") == "comptable").height
             
             return {
                 "total_users": total_users,
