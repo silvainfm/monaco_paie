@@ -23,6 +23,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus.doctemplate import BaseDocTemplate
 import pandas as pd
+import polars as pl
 from datetime import datetime, date
 from pathlib import Path
 import io
@@ -1672,7 +1673,7 @@ class PDFGeneratorService:
         self.journal_generator = PayJournalPDFGenerator(company_info, logo_path)
         self.pto_generator = PTOProvisionPDFGenerator(company_info, logo_path)
     
-    def generate_monthly_documents(self, employees_df: pd.DataFrame, 
+    def generate_monthly_documents(self, employees_df: pl.DataFrame, 
                                   period: str, output_dir: Optional[Path] = None) -> Dict[str, any]:
         """
         Générer tous les documents pour une période mensuelle
@@ -1751,7 +1752,7 @@ class PDFGeneratorService:
         
         return documents
     
-    def generate_paystub_batch(self, employees_df: pd.DataFrame, 
+    def generate_paystub_batch(self, employees_df: pl.DataFrame, 
                               period: str, output_dir: Path) -> List[str]:
         """
         Générer un lot de bulletins de paie
@@ -1776,7 +1777,7 @@ class PDFGeneratorService:
         
         return generated_files
     
-    def _calculate_yearly_cumul(self, df: pd.DataFrame, matricule: str, 
+    def _calculate_yearly_cumul(self, df: pl.DataFrame, matricule: str, 
                                field: str, current_date: datetime) -> float:
         """
         Calculer le cumul annuel pour un employé
@@ -1791,7 +1792,7 @@ class PDFGeneratorService:
             return monthly_value * months_elapsed
         return 0
     
-    def _prepare_provisions_data(self, employees_df: pd.DataFrame, 
+    def _prepare_provisions_data(self, employees_df: pl.DataFrame, 
                                 period_date: datetime) -> List[Dict]:
         """
         Préparer les données de provision pour congés payés

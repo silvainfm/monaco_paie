@@ -2,6 +2,7 @@
 Module de calculs de paie spécifiques à Monaco
 ===============================================
 Includes all Monaco-specific payroll calculations, social charges, and tax rules
+Rates are loaded from CSV files for easy yearly updates
 """
 
 from dataclasses import dataclass
@@ -9,160 +10,210 @@ from typing import Dict, List, Optional, Tuple
 from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
 import pandas as pd
+import polars as pl
+import os
+from pathlib import Path
+import math
 
 @dataclass
 class MonacoPayrollConstants:
-    """Constantes de paie pour Monaco (2024)"""
-    
-    # Plafonds mensuels de la Sécurité Sociale
-    PLAFOND_SS_T1 = 3428.00  # Tranche 1
-    PLAFOND_SS_T2 = 13712.00  # Tranche 2 (4 x plafond T1)
-    
-    # Base légale d'heures mensuelles
-    BASE_HEURES_LEGALE = 169.00
-    
-    # SMIC Monaco
-    SMIC_HORAIRE = 11.65
-    
-    # Taux horaires supplémentaires
-    TAUX_HS_125 = 1.25  # 25% de majoration
-    TAUX_HS_150 = 1.50  # 50% de majoration
-    
-    # Tickets restaurant
-    TICKET_RESTO_VALEUR = 9.00
-    TICKET_RESTO_PART_PATRONALE = 0.60  # 60% employeur
-    TICKET_RESTO_PART_SALARIALE = 0.40  # 40% salarié
+    """Constantes de paie pour Monaco - loaded from CSV by year"""
+
+    def __init__(self, year: int = None):
+        """Initialize constants for a specific year"""
+        if year is None:
+            year = datetime.now().year
+        self.year = year
+        self._load_constants_from_csv()
+
+    def _load_constants_from_csv(self):
+        """Load constants from CSV file for the specific year"""
+        csv_path = Path("config") / "payroll_rates.csv"
+
+        # Default values (2024)
+        defaults = {
+            'PLAFOND_SS_T1': 3428.00,
+            'PLAFOND_SS_T2': 13712.00,
+            'BASE_HEURES_LEGALE': 169.00,
+            'SMIC_HORAIRE': 11.65,
+            'TAUX_HS_125': 1.25,
+            'TAUX_HS_150': 1.50,
+            'TICKET_RESTO_VALEUR': 9.00,
+            'TICKET_RESTO_PART_PATRONALE': 0.60,
+            'TICKET_RESTO_PART_SALARIALE': 0.40
+        }
+
+        if csv_path.exists():
+            try:
+                df = pl.read_csv(csv_path)
+                year_col = f"taux_{self.year}"
+
+                # Check if year column exists
+                if year_col not in df.columns:
+                    print(f"Attention: pas de taux pour {self.year} dans le fichier CSV. Utilisation des valeurs par défaut.")
+                    for key, value in defaults.items():
+                        setattr(self, key, value)
+                    return
+
+                # Filter constants
+                constants_df = df.filter(pl.col("category") == "CONSTANT")
+
+                # Load each constant
+                for row in constants_df.iter_rows(named=True):
+                    const_name = row["code"]
+                    if const_name in defaults:
+                        raw_val = row.get(year_col)
+                        value = (
+                            float(raw_val)
+                            if raw_val is not None and str(raw_val).strip() != ""
+                            else defaults[const_name]
+                        )
+                        setattr(self, const_name, value)
+
+                # Set missing constants to defaults
+                for key, value in defaults.items():
+                    if not hasattr(self, key):
+                        setattr(self, key, value)
+
+            except Exception as e:
+                print(f"Erreur lors du chargement des constantes depuis le CSV : {e}. Utilisation des valeurs par défaut.")
+                for key, value in defaults.items():
+                    setattr(self, key, value)
+        else:
+            # Use defaults if no CSV file exists
+            for key, value in defaults.items():
+                setattr(self, key, value)
+            # Create default CSV for future use
+            self._create_default_csv(csv_path)
+
+    def _create_default_csv(self, csv_path: Path):
+        """Create default CSV file with all rates and constants"""
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+
+        data = [
+            # Constants
+            {'category': 'CONSTANT', 'type': '', 'code': 'PLAFOND_SS_T1', 'description': 'Plafond Sécurité Sociale Tranche 1',
+             'plafond': '', 'taux_2024': 3428.00, 'taux_2025': 3428.00},
+            {'category': 'CONSTANT', 'type': '', 'code': 'PLAFOND_SS_T2', 'description': 'Plafond Sécurité Sociale Tranche 2',
+             'plafond': '', 'taux_2024': 13712.00, 'taux_2025': 13712.00},
+            {'category': 'CONSTANT', 'type': '', 'code': 'BASE_HEURES_LEGALE', 'description': 'Base légale heures mensuelles',
+             'plafond': '', 'taux_2024': 169.00, 'taux_2025': 169.00},
+            {'category': 'CONSTANT', 'type': '', 'code': 'SMIC_HORAIRE', 'description': 'SMIC horaire Monaco',
+             'plafond': '', 'taux_2024': 11.65, 'taux_2025': 11.65},
+            {'category': 'CONSTANT', 'type': '', 'code': 'TAUX_HS_125', 'description': 'Taux heures sup 125%',
+             'plafond': '', 'taux_2024': 1.25, 'taux_2025': 1.25},
+            {'category': 'CONSTANT', 'type': '', 'code': 'TAUX_HS_150', 'description': 'Taux heures sup 150%',
+             'plafond': '', 'taux_2024': 1.50, 'taux_2025': 1.50},
+            {'category': 'CONSTANT', 'type': '', 'code': 'TICKET_RESTO_VALEUR', 'description': 'Valeur unitaire ticket restaurant',
+             'plafond': '', 'taux_2024': 9.00, 'taux_2025': 9.00},
+            {'category': 'CONSTANT', 'type': '', 'code': 'TICKET_RESTO_PART_PATRONALE', 'description': 'Part patronale ticket restaurant',
+             'plafond': '', 'taux_2024': 0.60, 'taux_2025': 0.60},
+            {'category': 'CONSTANT', 'type': '', 'code': 'TICKET_RESTO_PART_SALARIALE', 'description': 'Part salariale ticket restaurant',
+             'plafond': '', 'taux_2024': 0.40, 'taux_2025': 0.40}
+        ]
+
+        df = pl.DataFrame(data)
+        df.write_csv(csv_path)
+        print(f"Created default rates CSV: {csv_path}")
 
 class ChargesSocialesMonaco:
     """Calcul des charges sociales selon la législation monégasque"""
     
-    # Taux de cotisations salariales (en %)
-    COTISATIONS_SALARIALES = {
-        # CAR - Caisse Autonome des Retraites
-        'CAR': {
-            'taux': 6.85,
-            'plafond': None,  # Pas de plafond
-            'description': 'Caisse Autonome des Retraites'
-        },
-        
-        # CCSS - Caisse de Compensation des Services Sociaux
-        'CCSS': {
-            'taux': 14.75,
-            'plafond': None,
-            'description': 'Caisse de Compensation des Services Sociaux'
-        },
-        
-        # Assurance chômage
-        'ASSEDIC_T1': {
-            'taux': 2.40,
-            'plafond': 'T1',
-            'description': 'Assurance chômage Tranche 1'
-        },
-        'ASSEDIC_T2': {
-            'taux': 2.40,
-            'plafond': 'T2',
-            'description': 'Assurance chômage Tranche 2'
-        },
-        
-        # Retraite complémentaire
-        'RETRAITE_COMP_T1': {
-            'taux': 3.15,
-            'plafond': 'T1',
-            'description': 'Retraite complémentaire Tranche 1'
-        },
-        'RETRAITE_COMP_T2': {
-            'taux': 8.64,
-            'plafond': 'T2',
-            'description': 'Retraite complémentaire Tranche 2'
-        },
-        
-        # Contribution d'équilibre
-        'CONTRIB_EQUILIBRE_TECH': {
-            'taux': 0.14,
-            'plafond': None,
-            'description': 'Contribution équilibre technique'
-        },
-        'CONTRIB_EQUILIBRE_GEN_T1': {
-            'taux': 0.86,
-            'plafond': 'T1',
-            'description': 'Contribution équilibre général T1'
-        },
-        'CONTRIB_EQUILIBRE_GEN_T2': {
-            'taux': 1.08,
-            'plafond': 'T2',
-            'description': 'Contribution équilibre général T2'
-        }
-    }
+    def __init__(self, year: int = None):
+        """Initialize with rates for a specific year"""
+        if year is None:
+            year = datetime.now().year
+        self.year = year
+        self._load_rates_from_csv()
     
-    # Taux de cotisations patronales (en %)
-    COTISATIONS_PATRONALES = {
-        # CAR
-        'CAR': {
-            'taux': 8.35,
-            'plafond': None,
-            'description': 'Caisse Autonome des Retraites'
-        },
+    def _load_rates_from_csv(self):
+        """Load social charge rates from unified CSV file"""
+        csv_path = Path("config") / "payroll_rates.csv"
         
-        # CMRC - Caisse Monégasque de Retraite Complémentaire
-        'CMRC': {
-            'taux': 5.22,
-            'plafond': None,
-            'description': 'Caisse Monégasque de Retraite Complémentaire'
-        },
-        
-        # Assurance chômage
-        'ASSEDIC_T1': {
-            'taux': 4.05,
-            'plafond': 'T1',
-            'description': 'Assurance chômage Tranche 1'
-        },
-        'ASSEDIC_T2': {
-            'taux': 4.05,
-            'plafond': 'T2',
-            'description': 'Assurance chômage Tranche 2'
-        },
-        
-        # Retraite complémentaire
-        'RETRAITE_COMP_T1': {
-            'taux': 4.72,
-            'plafond': 'T1',
-            'description': 'Retraite complémentaire Tranche 1'
-        },
-        'RETRAITE_COMP_T2': {
-            'taux': 12.95,
-            'plafond': 'T2',
-            'description': 'Retraite complémentaire Tranche 2'
-        },
-        
-        # Contribution d'équilibre
-        'CONTRIB_EQUILIBRE_TECH': {
-            'taux': 0.21,
-            'plafond': None,
-            'description': 'Contribution équilibre technique'
-        },
-        'CONTRIB_EQUILIBRE_GEN_T1': {
-            'taux': 1.29,
-            'plafond': 'T1',
-            'description': 'Contribution équilibre général T1'
-        },
-        'CONTRIB_EQUILIBRE_GEN_T2': {
-            'taux': 1.62,
-            'plafond': 'T2',
-            'description': 'Contribution équilibre général T2'
-        },
-        
-        # Prévoyance (variable selon convention)
-        'PREVOYANCE': {
-            'taux': 1.50,  # Taux moyen, peut varier
-            'plafond': None,
-            'description': 'Prévoyance collective'
+        # Default rates for fallback
+        default_salarial = {
+            'CAR': {'taux': 6.85, 'plafond': None, 'description': 'Caisse Autonome des Retraites'},
+            'CCSS': {'taux': 14.75, 'plafond': None, 'description': 'Caisse de Compensation des Services Sociaux'},
+            'ASSEDIC_T1': {'taux': 2.40, 'plafond': 'T1', 'description': 'Assurance chômage Tranche 1'},
+            'ASSEDIC_T2': {'taux': 2.40, 'plafond': 'T2', 'description': 'Assurance chômage Tranche 2'},
+            'RETRAITE_COMP_T1': {'taux': 3.15, 'plafond': 'T1', 'description': 'Retraite complémentaire Tranche 1'},
+            'RETRAITE_COMP_T2': {'taux': 8.64, 'plafond': 'T2', 'description': 'Retraite complémentaire Tranche 2'},
+            'CONTRIB_EQUILIBRE_TECH': {'taux': 0.14, 'plafond': None, 'description': 'Contribution équilibre technique'},
+            'CONTRIB_EQUILIBRE_GEN_T1': {'taux': 0.86, 'plafond': 'T1', 'description': 'Contribution équilibre général T1'},
+            'CONTRIB_EQUILIBRE_GEN_T2': {'taux': 1.08, 'plafond': 'T2', 'description': 'Contribution équilibre général T2'}
         }
-    }
+        
+        default_patronal = {
+            'CAR': {'taux': 8.35, 'plafond': None, 'description': 'Caisse Autonome des Retraites'},
+            'CMRC': {'taux': 5.22, 'plafond': None, 'description': 'Caisse Monégasque de Retraite Complémentaire'},
+            'ASSEDIC_T1': {'taux': 4.05, 'plafond': 'T1', 'description': 'Assurance chômage Tranche 1'},
+            'ASSEDIC_T2': {'taux': 4.05, 'plafond': 'T2', 'description': 'Assurance chômage Tranche 2'},
+            'RETRAITE_COMP_T1': {'taux': 4.72, 'plafond': 'T1', 'description': 'Retraite complémentaire Tranche 1'},
+            'RETRAITE_COMP_T2': {'taux': 12.95, 'plafond': 'T2', 'description': 'Retraite complémentaire Tranche 2'},
+            'CONTRIB_EQUILIBRE_TECH': {'taux': 0.21, 'plafond': None, 'description': 'Contribution équilibre technique'},
+            'CONTRIB_EQUILIBRE_GEN_T1': {'taux': 1.29, 'plafond': 'T1', 'description': 'Contribution équilibre général T1'},
+            'CONTRIB_EQUILIBRE_GEN_T2': {'taux': 1.62, 'plafond': 'T2', 'description': 'Contribution équilibre général T2'},
+            'PREVOYANCE': {'taux': 1.50, 'plafond': None, 'description': 'Prévoyance collective'}
+        }
+        
+
+        if csv_path.exists():
+            try:
+                df = pl.read_csv(csv_path)
+                year_col = f"taux_{self.year}"
+
+                # Vérifier la présence de la colonne pour l'année
+                if year_col not in df.columns:
+                    print(f"Avertissement : aucun taux pour l’année {self.year} dans le CSV. Utilisation des valeurs par défaut.")
+                    self.COTISATIONS_SALARIALES = default_salarial
+                    self.COTISATIONS_PATRONALES = default_patronal
+                    return
+
+                # Charges salariales
+                salarial_df = df.filter((pl.col("category") == "CHARGE") & (pl.col("type") == "SALARIAL"))
+                self.COTISATIONS_SALARIALES = {}
+                for row in salarial_df.iter_rows(named=True):
+                    code = row["code"]
+                    raw_val = row.get(year_col)
+                    is_valid = raw_val is not None and not (isinstance(raw_val, float) and math.isnan(raw_val))
+                    taux = float(raw_val) if is_valid and str(raw_val) != "" else default_salarial.get(code, {}).get("taux", 0)
+                    plafond_val = None if row.get("plafond") == "None" else row.get("plafond")
+                    self.COTISATIONS_SALARIALES[code] = {
+                        "taux": taux,
+                        "plafond": plafond_val,
+                        "description": row.get("description"),
+                    }
+
+                # Charges patronales
+                patronal_df = df.filter((pl.col("category") == "CHARGE") & (pl.col("type") == "PATRONAL"))
+                self.COTISATIONS_PATRONALES = {}
+                for row in patronal_df.iter_rows(named=True):
+                    code = row["code"]
+                    raw_val = row.get(year_col)
+                    is_valid = raw_val is not None and not (isinstance(raw_val, float) and math.isnan(raw_val))
+                    taux = float(raw_val) if is_valid and str(raw_val) != "" else default_patronal.get(code, {}).get("taux", 0)
+                    plafond_val = None if row.get("plafond") == "None" else row.get("plafond")
+                    self.COTISATIONS_PATRONALES[code] = {
+                        "taux": taux,
+                        "plafond": plafond_val,
+                        "description": row.get("description"),
+                    }
+
+            except Exception as e:
+                print(f"Erreur lors du chargement des taux depuis le CSV : {e}. Utilisation des valeurs par défaut.")
+                self.COTISATIONS_SALARIALES = default_salarial
+                self.COTISATIONS_PATRONALES = default_patronal
+        else:
+            # Créer le CSV par défaut et utiliser les valeurs par défaut
+            self.COTISATIONS_SALARIALES = default_salarial
+            self.COTISATIONS_PATRONALES = default_patronal
+            constants = MonacoPayrollConstants(self.year)  # Génère le CSV par défaut
+
     
     @classmethod
-    def calculate_base_tranches(cls, salaire_brut: float) -> Dict[str, float]:
+    def calculate_base_tranches(cls, salaire_brut: float, year: int = None) -> Dict[str, float]:
         """Calculer les bases de cotisation par tranche"""
-        constants = MonacoPayrollConstants()
+        constants = MonacoPayrollConstants(year)
         
         tranches = {
             'T1': min(salaire_brut, constants.PLAFOND_SS_T1),
@@ -173,8 +224,7 @@ class ChargesSocialesMonaco:
         
         return tranches
     
-    @classmethod
-    def calculate_cotisations(cls, salaire_brut: float, 
+    def calculate_cotisations(self, salaire_brut: float, 
                             type_cotisation: str = 'salariales') -> Dict[str, float]:
         """
         Calculer les cotisations sociales
@@ -186,9 +236,9 @@ class ChargesSocialesMonaco:
         Returns:
             Dictionnaire des cotisations par type
         """
-        tranches = cls.calculate_base_tranches(salaire_brut)
+        tranches = self.calculate_base_tranches(salaire_brut, self.year)
         
-        cotisations = type_cotisation.upper() == 'SALARIALES' and cls.COTISATIONS_SALARIALES or cls.COTISATIONS_PATRONALES
+        cotisations = self.COTISATIONS_SALARIALES if type_cotisation.upper() == 'SALARIALES' else self.COTISATIONS_PATRONALES
         
         results = {}
         
@@ -205,16 +255,15 @@ class ChargesSocialesMonaco:
         
         return results
     
-    @classmethod
-    def calculate_total_charges(cls, salaire_brut: float) -> Tuple[float, float, Dict]:
+    def calculate_total_charges(self, salaire_brut: float) -> Tuple[float, float, Dict]:
         """
         Calculer le total des charges salariales et patronales
         
         Returns:
             Tuple (total_salarial, total_patronal, details)
         """
-        charges_salariales = cls.calculate_cotisations(salaire_brut, 'salariales')
-        charges_patronales = cls.calculate_cotisations(salaire_brut, 'patronales')
+        charges_salariales = self.calculate_cotisations(salaire_brut, 'salariales')
+        charges_patronales = self.calculate_cotisations(salaire_brut, 'patronales')
         
         total_salarial = sum(charges_salariales.values())
         total_patronal = sum(charges_patronales.values())
@@ -224,7 +273,8 @@ class ChargesSocialesMonaco:
             'charges_patronales': charges_patronales,
             'total_salarial': total_salarial,
             'total_patronal': total_patronal,
-            'cout_total': salaire_brut + total_patronal
+            'cout_total': salaire_brut + total_patronal,
+            'year': self.year
         }
         
         return total_salarial, total_patronal, details
@@ -232,12 +282,18 @@ class ChargesSocialesMonaco:
 class CalculateurPaieMonaco:
     """Calculateur principal de paie pour Monaco"""
     
-    def __init__(self):
-        self.constants = MonacoPayrollConstants()
-        self.charges_calculator = ChargesSocialesMonaco()
+    def __init__(self, year: int = None):
+        """Initialize calculator for a specific year"""
+        if year is None:
+            year = datetime.now().year
+        self.year = year
+        self.constants = MonacoPayrollConstants(year)
+        self.charges_calculator = ChargesSocialesMonaco(year)
     
-    def calculate_hourly_rate(self, salaire_base: float, base_heures: float = 169) -> float:
+    def calculate_hourly_rate(self, salaire_base: float, base_heures: float = None) -> float:
         """Calculer le taux horaire"""
+        if base_heures is None:
+            base_heures = self.constants.BASE_HEURES_LEGALE
         if base_heures == 0:
             return 0
         return salaire_base / base_heures
@@ -312,7 +368,8 @@ class CalculateurPaieMonaco:
             'valeur_totale': valeur_totale,
             'part_patronale': part_patronale,
             'part_salariale': part_salariale,
-            'nombre': nombre_tickets
+            'nombre': nombre_tickets,
+            'valeur_unitaire': self.constants.TICKET_RESTO_VALEUR
         }
     
     def calculate_conges_payes(self, salaire_base: float, jours_pris: float) -> float:
@@ -331,16 +388,32 @@ class CalculateurPaieMonaco:
         provision = salaire_journalier * jours_acquis * 1.1  # +10% pour charges
         return round(provision, 2)
     
-    def process_employee_payslip(self, employee_data: Dict) -> Dict:
+    def process_employee_payslip(self, employee_data: Dict, 
+                                processing_date: date = None) -> Dict:
         """
         Traiter une fiche de paie complète pour un employé
         
         Args:
             employee_data: Dictionnaire contenant toutes les données de l'employé
+            processing_date: Date de traitement (pour déterminer l'année des taux)
         
         Returns:
             Dictionnaire avec tous les calculs de paie
         """
+        # Determine the year for rates (from processing date or payslip period)
+        if processing_date:
+            calc_year = processing_date.year
+        elif 'period_year' in employee_data:
+            calc_year = employee_data['period_year']
+        else:
+            calc_year = self.year
+        
+        # Reinitialize if year is different
+        if calc_year != self.year:
+            self.year = calc_year
+            self.constants = MonacoPayrollConstants(calc_year)
+            self.charges_calculator = ChargesSocialesMonaco(calc_year)
+        
         # Extraction des données
         salaire_base = employee_data.get('salaire_base', 0)
         base_heures = employee_data.get('base_heures', self.constants.BASE_HEURES_LEGALE)
@@ -417,6 +490,8 @@ class CalculateurPaieMonaco:
             'salaire_base': salaire_base,
             'taux_horaire': hourly_rate,
             'heures_travaillees': base_heures,
+            'base_heures': base_heures,
+            'heures_payees': base_heures,
             
             # Heures supplémentaires et majorations
             'heures_sup_125': heures_sup_125,
@@ -442,11 +517,12 @@ class CalculateurPaieMonaco:
             'avantages_nature': total_avantages_nature,
             
             # Tickets restaurant
-            'tickets_restaurant': tickets_details,
+            'tickets_restaurant': tickets_restaurant,
+            'tickets_restaurant_details': tickets_details,
             
             # Congés payés
-            'jours_conges_pris': jours_conges_pris,
-            'indemnite_conges_payes': indemnite_cp,
+            'jours_cp_pris': jours_conges_pris,
+            'indemnite_cp': indemnite_cp,
             
             # Totaux
             'salaire_brut': round(salaire_brut, 2),
@@ -456,24 +532,31 @@ class CalculateurPaieMonaco:
             'cout_total_employeur': round(cout_total, 2),
             
             # Détails des charges
-            'details_charges': charges_details
+            'details_charges': charges_details,
+            
+            # Year for rates used
+            'calculation_year': calc_year
         }
 
 class ValidateurPaieMonaco:
     """Validateur et détecteur de cas particuliers"""
     
     @staticmethod
-    def validate_payslip(payslip_data: Dict) -> Tuple[bool, List[str]]:
+    def validate_payslip(payslip_data: Dict, year: int = None) -> Tuple[bool, List[str]]:
         """
         Valider une fiche de paie et détecter les anomalies
         
         Returns:
             Tuple (is_valid, list_of_issues)
         """
+        if year is None:
+            year = payslip_data.get('calculation_year', datetime.now().year)
+        
+        constants = MonacoPayrollConstants(year)
         issues = []
         
         # Vérifications de base
-        if payslip_data.get('salaire_brut', 0) < MonacoPayrollConstants.SMIC_HORAIRE * 169:
+        if payslip_data.get('salaire_brut', 0) < constants.SMIC_HORAIRE * constants.BASE_HEURES_LEGALE:
             issues.append("Salaire inférieur au SMIC")
         
         if payslip_data.get('salaire_brut', 0) > 100000:
@@ -560,10 +643,129 @@ class GestionnaireCongesPayes:
         
         return pd.DataFrame(provisions)
 
-# Exemple d'utilisation
+# Utility functions for managing rates
+def add_year_to_rates_csv(year: int):
+    """Add a new year column to the existing rates CSV"""
+    csv_path = Path("config") / "payroll_rates.csv"
+    
+    if not csv_path.exists():
+        # Create default CSV first
+        constants = MonacoPayrollConstants(year)
+        return
+    
+    df = pl.read_csv(csv_path)
+    new_col = f'taux_{year}'
+    
+    if new_col in df.columns:
+        print(f"Year {year} already exists in rates CSV")
+        return
+    
+    # Copy rates from the most recent year
+    existing_years = [col for col in df.columns if col.startswith('taux_')]
+    if existing_years:
+        latest_year = sorted(existing_years)[-1]
+        df = df.with_columns(pl.col(latest_year).alias(new_col))
+    else:
+        # Use defaults
+        df = df.with_columns(pl.col('taux_2024').alias(new_col))  # Assuming 2024 is base year
+    
+    df.write_csv(csv_path)
+    print(f"Added year {year} to rates CSV with rates copied from previous year")
+
+def update_rate_in_csv(year: int, category: str, rate_type: str, code: str, new_rate: float):
+    """
+    Update a specific rate in the CSV
+    
+    Args:
+        year: The year to update
+        category: 'CHARGE' or 'CONSTANT'
+        rate_type: 'SALARIAL' or 'PATRONAL' (for charges only)
+        code: The code of the rate (e.g., 'CAR', 'CCSS')
+        new_rate: The new rate value
+    """
+    csv_path = Path("config") / "payroll_rates.csv"
+    
+    if not csv_path.exists():
+        print("Rates CSV does not exist. Creating default...")
+        constants = MonacoPayrollConstants(year)
+        
+    df = pl.read_csv(csv_path)
+    year_col = f'taux_{year}'
+    
+    if year_col not in df.columns:
+        print(f"Adding year {year} to CSV...")
+        add_year_to_rates_csv(year)
+        df = pl.read_csv(csv_path)
+    
+    # Find the row to update
+    if category == 'CONSTANT':
+        mask = (df['category'] == category) & (df['code'] == code)
+    else:  # CHARGE
+        mask = (df['category'] == category) & (df['type'] == rate_type) & (df['code'] == code)
+    
+    if mask.any():
+        df = df.with_columns(pl.when(mask).then(new_rate).otherwise(pl.col(year_col)).alias(year_col))
+        df.write_csv(csv_path)
+        print(f"Updated {code} rate to {new_rate} for year {year}")
+    else:
+        print(f"Could not find {category} {rate_type} {code} in CSV")
+
+def display_rates_for_year(year: int):
+    """Display all rates for a specific year"""
+    csv_path = Path("config") / "payroll_rates.csv"
+    
+    if not csv_path.exists():
+        print("Rates CSV does not exist")
+        return
+    
+    df = pl.read_csv(csv_path)
+    year_col = f'taux_{year}'
+    
+    if year_col not in df.columns:
+        print(f"No rates for year {year}")
+        return
+    
+    print(f"\n=== RATES FOR {year} ===")
+    
+    # Display constants
+    print("\nCONSTANTS:")
+    constants_df = df.filter(pl.col('category') == 'CONSTANT')
+    for row in constants_df.iter_rows(named=True):
+        print(f"  {row['code']}: {row[year_col]} - {row['description']}")
+    
+    # Display salarial charges
+    print("\nSALARIAL CHARGES:")
+    salarial_df = df.filter((pl.col('category') == 'CHARGE') & (pl.col('type') == 'SALARIAL'))
+    for row in salarial_df.iter_rows(named=True):
+        plafond_str = f" (Plafond: {row['plafond']})" if row['plafond'] != 'None' else ""
+        print(f"  {row['code']}: {row[year_col]}%{plafond_str} - {row['description']}")
+    
+    # Display patronal charges
+    print("\nPATRONAL CHARGES:")
+    patronal_df = df.filter((pl.col('category') == 'CHARGE') & (pl.col('type') == 'PATRONAL'))
+    for row in patronal_df.iter_rows(named=True):
+        plafond_str = f" (Plafond: {row['plafond']})" if row['plafond'] != 'None' else ""
+        print(f"  {row['code']}: {row[year_col]}%{plafond_str} - {row['description']}")
+
+# Example usage
 if __name__ == "__main__":
-    # Test avec un employé exemple
-    calculateur = CalculateurPaieMonaco()
+    # Create or ensure rates CSV exists
+    csv_path = Path("config") / "payroll_rates.csv"
+    if not csv_path.exists():
+        print("Creating default rates CSV...")
+        constants = MonacoPayrollConstants(2024)
+    
+    # Display current rates
+    display_rates_for_year(2024)
+    display_rates_for_year(2025)
+    
+    # Example: Update CAR rate for 2025
+    print("\n=== Updating CAR salarial rate to 6.90% for 2025 ===")
+    update_rate_in_csv(2025, 'CHARGE', 'SALARIAL', 'CAR', 6.90)
+    
+    # Test with an employee for 2024
+    print("\n=== TESTING 2024 CALCULATION ===")
+    calculateur_2024 = CalculateurPaieMonaco(year=2024)
     
     employee_test = {
         'matricule': 'S000000001',
@@ -579,27 +781,28 @@ if __name__ == "__main__":
         'avantage_logement': 0,
         'avantage_transport': 50,
         'heures_absence': 0,
-        'jours_conges_pris': 2
+        'jours_conges_pris': 2,
+        'period_year': 2024
     }
     
-    resultat = calculateur.process_employee_payslip(employee_test)
+    resultat_2024 = calculateur_2024.process_employee_payslip(employee_test)
     
-    print("=== BULLETIN DE PAIE TEST ===")
-    print(f"Employé: {resultat['nom']} {resultat['prenom']}")
-    print(f"Salaire de base: {resultat['salaire_base']:.2f} €")
-    print(f"Heures supplémentaires: {resultat['total_heures_sup']:.2f} €")
-    print(f"Prime: {resultat['prime']:.2f} €")
-    print(f"SALAIRE BRUT: {resultat['salaire_brut']:.2f} €")
-    print(f"Charges salariales: -{resultat['total_charges_salariales']:.2f} €")
-    print(f"SALAIRE NET: {resultat['salaire_net']:.2f} €")
-    print(f"Charges patronales: {resultat['total_charges_patronales']:.2f} €")
-    print(f"Coût total employeur: {resultat['cout_total_employeur']:.2f} €")
+    print(f"Employé: {resultat_2024['nom']} {resultat_2024['prenom']}")
+    print(f"Année de calcul: {resultat_2024['calculation_year']}")
+    print(f"SALAIRE BRUT: {resultat_2024['salaire_brut']:.2f} €")
+    print(f"Charges salariales: -{resultat_2024['total_charges_salariales']:.2f} €")
+    print(f"  dont CAR: {resultat_2024['details_charges']['charges_salariales']['CAR']:.2f} €")
+    print(f"SALAIRE NET: {resultat_2024['salaire_net']:.2f} €")
     
-    # Validation
-    validateur = ValidateurPaieMonaco()
-    is_valid, issues = validateur.validate_payslip(resultat)
+    # Test with 2025 (with updated CAR rate)
+    print("\n=== TESTING 2025 CALCULATION (with updated CAR) ===")
+    calculateur_2025 = CalculateurPaieMonaco(year=2025)
+    employee_test['period_year'] = 2025
+    resultat_2025 = calculateur_2025.process_employee_payslip(employee_test)
     
-    if not is_valid:
-        print("\n⚠️ Anomalies détectées:")
-        for issue in issues:
-            print(f"  - {issue}")
+    print(f"Employé: {resultat_2025['nom']} {resultat_2025['prenom']}")
+    print(f"Année de calcul: {resultat_2025['calculation_year']}")
+    print(f"SALAIRE BRUT: {resultat_2025['salaire_brut']:.2f} €")
+    print(f"Charges salariales: -{resultat_2025['total_charges_salariales']:.2f} €")
+    print(f"  dont CAR (6.90%): {resultat_2025['details_charges']['charges_salariales']['CAR']:.2f} €")
+    print(f"SALAIRE NET: {resultat_2025['salaire_net']:.2f} €")
