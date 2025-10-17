@@ -4,7 +4,8 @@ Import/Export Module with Cross-Border Worker Support
 Handles Excel import/export and calculations for Monaco, French, and Italian residents
 """
 
-import pandas as pd
+import polars as pl
+import xlsxwriter
 import numpy as np
 from datetime import datetime, date
 from typing import Dict, List, Optional, Tuple, Union
@@ -214,79 +215,58 @@ class ExcelImportExport:
     ]
     
     @classmethod
-    def validate_excel_format(cls, df: pd.DataFrame) -> Tuple[bool, List[str]]:
-        """
-        Valider le format du fichier Excel importé
-        
-        Returns:
-            Tuple (is_valid, list_of_errors)
-        """
+    def validate_excel_format(cls, df: pl.DataFrame) -> Tuple[bool, List[str]]:
+        """Valider le format du fichier Excel importé"""
         errors = []
         
-        # Vérifier les colonnes requises
         missing_columns = set(cls.REQUIRED_COLUMNS) - set(df.columns)
         if missing_columns:
             errors.append(f"Colonnes manquantes: {', '.join(missing_columns)}")
         
-        # Vérifier les types de données
         if 'Base heures' in df.columns:
             try:
-                pd.to_numeric(df['Base heures'], errors='coerce')
+                df.select(pl.col('Base heures').cast(pl.Float64, strict=False))
             except:
                 errors.append("'Base heures' doit contenir des valeurs numériques")
         
         if 'Salaire de base' in df.columns:
             try:
-                pd.to_numeric(df['Salaire de base'], errors='coerce')
+                df.select(pl.col('Salaire de base').cast(pl.Float64, strict=False))
             except:
                 errors.append("'Salaire de base' doit contenir des valeurs numériques")
         
-        # Vérifier les matricules uniques
         if 'Matricule' in df.columns:
-            duplicates = df['Matricule'].duplicated().sum()
+            duplicates = df.filter(pl.col('Matricule').is_duplicated()).height
             if duplicates > 0:
                 errors.append(f"{duplicates} matricules en double détectés")
         
-        is_valid = len(errors) == 0
-        return is_valid, errors
+        return len(errors) == 0, errors
     
     @classmethod
-    def import_from_excel(cls, file_path: Union[str, Path, io.BytesIO]) -> pd.DataFrame:
-        """
-        Importer les données depuis un fichier Excel
+    def import_from_excel(cls, file_path: Union[str, Path, io.BytesIO]) -> pl.DataFrame:
+        """Importer les données depuis un fichier Excel"""
+        df = pl.read_excel(file_path, sheet_id=1)
         
-        Args:
-            file_path: Chemin vers le fichier ou buffer
-            
-        Returns:
-            DataFrame avec les données importées et mappées
-        """
-        # Lire le fichier Excel
-        df = pd.read_excel(file_path, sheet_name=0)
-        
-        # Valider le format
         is_valid, errors = cls.validate_excel_format(df)
         if not is_valid:
             raise ValueError(f"Erreurs de validation: {'; '.join(errors)}")
         
-        # Mapper les colonnes
-        df_mapped = df.rename(columns=cls.EXCEL_COLUMN_MAPPING)
+        df = df.rename(cls.EXCEL_COLUMN_MAPPING)
         
-        # Ajouter les colonnes manquantes avec valeurs par défaut
+        # Add missing columns with defaults
         for col in cls.EXCEL_COLUMN_MAPPING.values():
-            if col not in df_mapped.columns:
+            if col not in df.columns:
                 if 'heures' in col or 'montant' in col or 'charges' in col:
-                    df_mapped[col] = 0
+                    df = df.with_columns(pl.lit(0.0).alias(col))
                 elif col == 'pays_residence':
-                    df_mapped[col] = 'MONACO'  # Par défaut
+                    df = df.with_columns(pl.lit('MONACO').alias(col))
                 elif col == 'type_absence':
-                    df_mapped[col] = 'non_payee'
+                    df = df.with_columns(pl.lit('non_payee').alias(col))
                 elif col == 'type_prime':
-                    df_mapped[col] = 'performance'
+                    df = df.with_columns(pl.lit('performance').alias(col))
                 else:
-                    df_mapped[col] = None
+                    df = df.with_columns(pl.lit(None).alias(col))
         
-        # Convertir les types
         numeric_columns = [
             'base_heures', 'salaire_base', 'heures_sup_125', 'heures_sup_150',
             'heures_jours_feries', 'heures_dimanche', 'heures_absence',
@@ -295,109 +275,90 @@ class ExcelImportExport:
         ]
         
         for col in numeric_columns:
-            if col in df_mapped.columns:
-                df_mapped[col] = pd.to_numeric(df_mapped[col], errors='coerce').fillna(0)
+            if col in df.columns:
+                df = df.with_columns(
+                    pl.col(col).cast(pl.Float64, strict=False).fill_null(0.0)
+                )
         
-        # Convertir les dates
-        if 'date_sortie' in df_mapped.columns:
-            df_mapped['date_sortie'] = pd.to_datetime(df_mapped['date_sortie'], errors='coerce')
+        if 'date_sortie' in df.columns:
+            df = df.with_columns(
+                pl.col('date_sortie').str.strptime(pl.Date, "%Y-%m-%d", strict=False)
+            )
         
-        # Standardiser le pays de résidence
-        if 'pays_residence' in df_mapped.columns:
-            df_mapped['pays_residence'] = df_mapped['pays_residence'].str.upper().replace({
-                'FR': 'FRANCE',
-                'IT': 'ITALY',
-                'ITALIE': 'ITALY',
-                'MC': 'MONACO',
-                'MONACO': 'MONACO'
-            }).fillna('MONACO')
+        if 'pays_residence' in df.columns:
+            df = df.with_columns(
+                pl.col('pays_residence')
+                .str.to_uppercase()
+                .replace({'FR': 'FRANCE', 'IT': 'ITALY', 'ITALIE': 'ITALY', 'MC': 'MONACO'})
+                .fill_null('MONACO')
+            )
         
-        # Ajouter les colonnes de statut
-        df_mapped['statut_validation'] = 'À traiter'
-        df_mapped['edge_case_flag'] = False
-        df_mapped['edge_case_reason'] = ''
-        df_mapped['date_import'] = datetime.now()
+        df = df.with_columns([
+            pl.lit('À traiter').alias('statut_validation'),
+            pl.lit(False).alias('edge_case_flag'),
+            pl.lit('').alias('edge_case_reason'),
+            pl.lit(datetime.now()).alias('date_import')
+        ])
         
-        return df_mapped
-    
+        return df
+
     @classmethod
-    def export_to_excel(cls, df: pd.DataFrame, 
-                       include_calculations: bool = True,
-                       include_details: bool = False) -> io.BytesIO:
-        """
-        Exporter les données vers Excel
-        
-        Args:
-            df: DataFrame à exporter
-            include_calculations: Inclure les colonnes calculées
-            include_details: Inclure le détail des charges
-            
-        Returns:
-            BytesIO buffer contenant le fichier Excel
-        """
+    def export_to_excel(cls, df: pl.DataFrame, 
+                    include_calculations: bool = True,
+                    include_details: bool = False) -> io.BytesIO:
+        """Exporter les données vers Excel"""
         output = io.BytesIO()
         
-        # Use a simpler approach if xlsxwriter not available
-        try:
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                # Feuille principale
-                if include_calculations:
-                    # Use available columns from OUTPUT_COLUMNS
-                    export_cols = [col for col in cls.OUTPUT_COLUMNS if col in df.columns]
-                    export_df = df[export_cols].copy()
-                else:
-                    # Seulement les colonnes d'entrée
-                    export_df = df[[col for col in cls.EXCEL_COLUMN_MAPPING.values() 
-                                   if col in df.columns]].copy()
-                
-                # Formater les colonnes monétaires
-                money_columns = [
-                    'salaire_base', 'salaire_brut', 'salaire_net',
-                    'total_charges_salariales', 'total_charges_patronales',
-                    'cout_total_employeur', 'prime', 'avantage_logement',
-                    'avantage_transport', 'montant_hs_125', 'montant_hs_150',
-                    'montant_jours_feries', 'montant_dimanches', 'retenue_absence',
-                    'csg_crds_total', 'prelevement_source', 'retenue_source_italie'
+        if include_calculations:
+            export_cols = [col for col in cls.OUTPUT_COLUMNS if col in df.columns]
+            export_df = df.select(export_cols)
+        else:
+            export_df = df.select([col for col in cls.EXCEL_COLUMN_MAPPING.values() 
+                                if col in df.columns])
+        
+        money_columns = [
+            'salaire_base', 'salaire_brut', 'salaire_net',
+            'total_charges_salariales', 'total_charges_patronales',
+            'cout_total_employeur', 'prime', 'avantage_logement',
+            'avantage_transport', 'montant_hs_125', 'montant_hs_150',
+            'montant_jours_feries', 'montant_dimanches', 'retenue_absence',
+            'csg_crds_total', 'prelevement_source', 'retenue_source_italie'
+        ]
+        
+        for col in money_columns:
+            if col in export_df.columns:
+                export_df = export_df.with_columns(
+                    pl.col(col).round(2)
+                )
+        
+        export_df.write_excel(output, worksheet='Paie')
+        
+        if include_calculations and 'salaire_brut' in df.columns:
+            summary_df = pl.DataFrame({
+                'Statistiques': [
+                    'Nombre de salariés', 
+                    'Masse salariale brute', 
+                    'Total charges salariales', 
+                    'Total charges patronales',
+                    'Coût total', 
+                    'Salaire net moyen'
+                ],
+                'Valeurs': [
+                    df.height,
+                    df['salaire_brut'].sum() if 'salaire_brut' in df.columns else 0,
+                    df['total_charges_salariales'].sum() if 'total_charges_salariales' in df.columns else 0,
+                    df['total_charges_patronales'].sum() if 'total_charges_patronales' in df.columns else 0,
+                    df['cout_total_employeur'].sum() if 'cout_total_employeur' in df.columns else 0,
+                    df['salaire_net'].mean() if 'salaire_net' in df.columns else 0
                 ]
-                
-                for col in money_columns:
-                    if col in export_df.columns:
-                        export_df[col] = export_df[col].round(2)
-                
-                # Écrire la feuille principale
-                export_df.to_excel(writer, sheet_name='Paie', index=False)
-                
-                # Ajouter une feuille de synthèse
-                if include_calculations and 'salaire_brut' in df.columns:
-                    summary_data = {
-                        'Statistiques': [
-                            'Nombre de salariés', 
-                            'Masse salariale brute', 
-                            'Total charges salariales', 
-                            'Total charges patronales',
-                            'Coût total', 
-                            'Salaire net moyen'
-                        ],
-                        'Valeurs': [
-                            len(df),
-                            df['salaire_brut'].sum() if 'salaire_brut' in df.columns else 0,
-                            df['total_charges_salariales'].sum() if 'total_charges_salariales' in df.columns else 0,
-                            df['total_charges_patronales'].sum() if 'total_charges_patronales' in df.columns else 0,
-                            df['cout_total_employeur'].sum() if 'cout_total_employeur' in df.columns else 0,
-                            df['salaire_net'].mean() if 'salaire_net' in df.columns else 0
-                        ]
-                    }
-                    
-                    summary_df = pd.DataFrame(summary_data)
-                    summary_df.to_excel(writer, sheet_name='Synthèse', index=False)
-                
-        except ImportError:
-            # Fallback to basic Excel export
-            export_df.to_excel(output, index=False)
+            })
+            
+            with pl.Config() as cfg:
+                summary_df.write_excel(output, worksheet='Synthèse', position='A1')
         
         output.seek(0)
         return output
-    
+
     @classmethod
     def create_template(cls) -> io.BytesIO:
         """
@@ -407,7 +368,7 @@ class ExcelImportExport:
             BytesIO buffer contenant le template Excel
         """
         # Créer un DataFrame exemple
-        template_data = {
+        template_df = pl.DataFrame({
             'Matricule': ['S000001', 'S000002'],
             'Nom': ['EXEMPLE', 'TEST'],
             'Prénom': ['Jean', 'Marie'],
@@ -430,51 +391,60 @@ class ExcelImportExport:
             'Taux prélèvement source': [0, 0.15],
             'Date de Sortie': ['', ''],
             'Remarques': ['', 'À vérifier']
-        }
+        })
         
-        template_df = pd.DataFrame(template_data)
+        instructions_df = pl.DataFrame({
+            'Instructions': [
+                'Ce fichier est un template pour importer les données de paie',
+                '',
+                'Colonnes obligatoires:',
+                '- Matricule: Identifiant unique du salarié',
+                '- Nom: Nom de famille',
+                '- Prénom: Prénom',
+                '- Salaire de base: Salaire mensuel de base',
+                '- Base heures: Nombre d\'heures de base (généralement 169)',
+                '',
+                'Colonnes optionnelles:',
+                '- Email: Adresse email pour l\'envoi des bulletins',
+                '- Heures Sup 125/150: Heures supplémentaires',
+                '- Prime: Montant de la prime',
+                '- Type de prime: performance, anciennete, 13eme_mois, etc.',
+                '- Tickets restaurant: Nombre de tickets',
+                '- Pays résidence: MONACO, FRANCE, ou ITALY',
+                '- Taux prélèvement source: Pour résidents français (ex: 0.15 pour 15%)',
+                '- Date de Sortie: Date de départ du salarié',
+                '- Remarques: Notes particulières (déclenche vérification manuelle)',
+                '',
+                'Types d\'absence possibles:',
+                '- maladie_maintenue: Maladie avec maintien de salaire',
+                '- conges_sans_solde: Congés sans solde',
+                '- conges_payes: Congés payés',
+                '- non_payee: Absence non payée (par défaut)'
+            ]
+        })
         
         output = io.BytesIO()
         
         try:
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                template_df.to_excel(writer, sheet_name='Données', index=False)
-                
-                # Ajouter une feuille d'instructions
-                instructions = pd.DataFrame({
-                    'Instructions': [
-                        'Ce fichier est un template pour importer les données de paie',
-                        '',
-                        'Colonnes obligatoires:',
-                        '- Matricule: Identifiant unique du salarié',
-                        '- Nom: Nom de famille',
-                        '- Prénom: Prénom',
-                        '- Salaire de base: Salaire mensuel de base',
-                        '- Base heures: Nombre d\'heures de base (généralement 169)',
-                        '',
-                        'Colonnes optionnelles:',
-                        '- Email: Adresse email pour l\'envoi des bulletins',
-                        '- Heures Sup 125/150: Heures supplémentaires',
-                        '- Prime: Montant de la prime',
-                        '- Type de prime: performance, anciennete, 13eme_mois, etc.',
-                        '- Tickets restaurant: Nombre de tickets',
-                        '- Pays résidence: MONACO, FRANCE, ou ITALY',
-                        '- Taux prélèvement source: Pour résidents français (ex: 0.15 pour 15%)',
-                        '- Date de Sortie: Date de départ du salarié',
-                        '- Remarques: Notes particulières (déclenche vérification manuelle)',
-                        '',
-                        'Types d\'absence possibles:',
-                        '- maladie_maintenue: Maladie avec maintien de salaire',
-                        '- conges_sans_solde: Congés sans solde',
-                        '- conges_payes: Congés payés',
-                        '- non_payee: Absence non payée (par défaut)'
-                    ]
-                })
-                
-                instructions.to_excel(writer, sheet_name='Instructions', index=False)
+            workbook = xlsxwriter.Workbook(output, {'in_memory': True})
+            
+            # Write data sheet
+            worksheet1 = workbook.add_worksheet('Données')
+            for col_idx, col_name in enumerate(template_df.columns):
+                worksheet1.write(0, col_idx, col_name)
+                for row_idx, value in enumerate(template_df[col_name].to_list()):
+                    worksheet1.write(row_idx + 1, col_idx, value)
+            
+            # Write instructions sheet
+            worksheet2 = workbook.add_worksheet('Instructions')
+            for row_idx, instruction in enumerate(instructions_df['Instructions'].to_list()):
+                worksheet2.write(row_idx, 0, instruction)
+            
+            workbook.close()
+            
         except ImportError:
-            # Fallback to basic Excel
-            template_df.to_excel(output, index=False)
+            # Fallback: write only data sheet with polars
+            template_df.write_excel(output, worksheet='Données')
         
         output.seek(0)
         return output
@@ -506,73 +476,63 @@ class DataConsolidation:
         return data_dir / filename
     
     @staticmethod
-    def save_period_data(df: pd.DataFrame, company_id: str, 
+    def save_period_data(df: pl.DataFrame, company_id: str, 
                         month: int, year: int) -> None:
-        """
-        Sauvegarder les données pour une période
-        """
+        """Sauvegarder les données pour une période"""
         file_path = DataConsolidation.get_period_file(company_id, month, year)
         
         # Ajouter les métadonnées
-        df['company_id'] = company_id
-        df['period_year'] = year
-        df['period_month'] = month
-        df['period_str'] = f"{month:02d}-{year}"
-        df['last_modified'] = datetime.now()
+        df = df.with_columns([
+            pl.lit(company_id).alias('company_id'),
+            pl.lit(year).alias('period_year'),
+            pl.lit(month).alias('period_month'),
+            pl.lit(f"{month:02d}-{year}").alias('period_str'),
+            pl.lit(datetime.now()).alias('last_modified')
+        ])
         
-        # Sauvegarder - try parquet first, fallback to pickle
-        try:
-            df.to_parquet(file_path, index=False)
-        except:
-            df.to_pickle(file_path.with_suffix('.pkl'))
+        # Sauvegarder
+        df.write_parquet(file_path)
     
     @staticmethod
-    def load_period_data(company_id: str, month: int, year: int) -> pd.DataFrame:
-        """
-        Charger les données pour une période
-        """
+    def load_period_data(company_id: str, month: int, year: int) -> pl.DataFrame:
+        """Charger les données pour une période"""
         file_path = DataConsolidation.get_period_file(company_id, month, year)
         
         if file_path.exists():
-            try:
-                return pd.read_parquet(file_path)
-            except:
-                pkl_path = file_path.with_suffix('.pkl')
-                if pkl_path.exists():
-                    return pd.read_pickle(pkl_path)
+            return pl.read_parquet(file_path)
         
-        # Retourner un DataFrame vide avec la structure correcte
-        return pd.DataFrame(columns=ExcelImportExport.OUTPUT_COLUMNS + [
-            'company_id', 'period_year', 'period_month', 
-            'period_str', 'last_modified', 'email'
-        ])
+        return pl.DataFrame({
+            col: pl.Series([], dtype=pl.Utf8 if col in ['company_id', 'period_str', 'email'] else pl.Float64)
+            for col in ExcelImportExport.OUTPUT_COLUMNS + [
+                'company_id', 'period_year', 'period_month', 
+                'period_str', 'last_modified', 'email'
+            ]
+        })
     
     @staticmethod
-    def get_year_summary(company_id: str, year: int) -> pd.DataFrame:
-        """
-        Obtenir un résumé annuel consolidé
-        """
+    def get_year_summary(company_id: str, year: int) -> pl.DataFrame:
+        """Obtenir un résumé annuel consolidé"""
         summaries = []
         
         for month in range(1, 13):
             df = DataConsolidation.load_period_data(company_id, month, year)
             
-            if not df.empty:
+            if df.height > 0:
                 summary = {
                     'month': month,
                     'period': f"{month:02d}-{year}",
-                    'employee_count': len(df),
+                    'employee_count': df.height,
                     'total_brut': df['salaire_brut'].sum() if 'salaire_brut' in df.columns else 0,
                     'total_net': df['salaire_net'].sum() if 'salaire_net' in df.columns else 0,
                     'total_charges_sal': df['total_charges_salariales'].sum() if 'total_charges_salariales' in df.columns else 0,
                     'total_charges_pat': df['total_charges_patronales'].sum() if 'total_charges_patronales' in df.columns else 0,
                     'total_cost': df['cout_total_employeur'].sum() if 'cout_total_employeur' in df.columns else 0,
                     'edge_cases': df['edge_case_flag'].sum() if 'edge_case_flag' in df.columns else 0,
-                    'validated': (df['statut_validation'] == 'Validé').sum() if 'statut_validation' in df.columns else 0
+                    'validated': df.filter(pl.col('statut_validation') == 'Validé').height if 'statut_validation' in df.columns else 0
                 }
                 summaries.append(summary)
         
-        return pd.DataFrame(summaries)
+        return pl.DataFrame(summaries)
     
     @staticmethod
     def archive_period(company_id: str, month: int, year: int) -> bool:

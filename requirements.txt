@@ -9,3 +9,5 @@ duckdb
 bcrypt
 openpyxl
 xlsxwriter
+polars
+xlsxwriter
