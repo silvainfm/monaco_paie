@@ -17,7 +17,6 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 HAS_PYARROW = True
 
-
 # Configuration
 USERS_FILE = Path('data/users.parquet')
 LOCK_FILE = Path('data/users.lock')

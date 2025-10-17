@@ -16,7 +16,7 @@ import json
 import shutil
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Union
-import pandas as pd
+import polars as pl
 import io
 import logging
 from dataclasses import dataclass, asdict
@@ -854,7 +854,7 @@ class EmailDistributionService:
         
         return report
     
-    def get_email_report(self, period: Optional[str] = None) -> pd.DataFrame:
+    def get_email_report(self, period: Optional[str] = None) -> pl.DataFrame:
         """
         Obtenir un rapport des emails envoyés
         
@@ -871,16 +871,19 @@ class EmailDistributionService:
             logs = self.email_log
         
         if not logs:
-            return pd.DataFrame()
+            return pl.DataFrame()
         
-        df = pd.DataFrame(logs)
+        df = pl.DataFrame(logs)
         
         # Ajouter des colonnes calculées
-        df['status'] = df['success'].map({True: 'Envoyé', False: 'Échec'})
-        df['date'] = pd.to_datetime(df['timestamp']).dt.date
-        df['time'] = pd.to_datetime(df['timestamp']).dt.time
-        
-        return df[['date', 'time', 'employee_id', 'email', 'status', 'error']]
+        df = df.with_columns([
+            pl.col('success').map_elements(lambda x: 'Envoyé' if x else 'Échec').alias('status')
+        ])
+        df = df.with_columns([
+            pl.to_datetime(pl.col('timestamp')).dt.date().alias('date'),
+            pl.to_datetime(pl.col('timestamp')).dt.time().alias('time')
+        ])
+        return df.select(['date', 'time', 'employee_id', 'email', 'status', 'error'])
 
 
 class EmailConfigManager:
