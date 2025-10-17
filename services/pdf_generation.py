@@ -1778,7 +1778,7 @@ class PDFGeneratorService:
         return generated_files
     
     def _calculate_yearly_cumul(self, df: pl.DataFrame, matricule: str, 
-                               field: str, current_date: datetime) -> float:
+                            field: str, current_date: datetime) -> float:
         """
         Calculer le cumul annuel pour un employé
         
@@ -1786,20 +1786,20 @@ class PDFGeneratorService:
         """
         # Simplification: on multiplie par le nombre de mois écoulés
         months_elapsed = current_date.month
-        emp_row = df[df['matricule'] == matricule]
-        if not emp_row.empty:
-            monthly_value = emp_row[field].iloc[0] if field in emp_row.columns else 0
+        emp_row = df.filter(pl.col('matricule') == matricule)
+        if emp_row.height > 0:
+            monthly_value = emp_row.select(pl.col(field)).item(0, 0) if field in emp_row.columns else 0
             return monthly_value * months_elapsed
         return 0
     
     def _prepare_provisions_data(self, employees_df: pl.DataFrame, 
-                                period_date: datetime) -> List[Dict]:
+                            period_date: datetime) -> List[Dict]:
         """
         Préparer les données de provision pour congés payés
         """
         provisions = []
         
-        for _, emp in employees_df.iterrows():
+        for emp in employees_df.iter_rows(named=True):
             # Calcul simplifié des droits CP
             months_worked = period_date.month  # Simplification
             

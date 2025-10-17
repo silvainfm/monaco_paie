@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
-import pandas as pd
 import polars as pl
 import os
 from pathlib import Path
@@ -610,19 +609,19 @@ class GestionnaireCongesPayes:
         }
     
     @classmethod
-    def calculate_provision_cp_global(cls, employees_df: pd.DataFrame) -> pd.DataFrame:
+    def calculate_provision_cp_global(cls, employees_df: pl.DataFrame) -> pl.DataFrame:
         """
         Calculer la provision globale pour congés payés
         
         Args:
-            employees_df: DataFrame avec les données des employés
+            employees_df: Polars DataFrame avec les données des employés
             
         Returns:
-            DataFrame avec le calcul des provisions
+            Polars DataFrame avec le calcul des provisions
         """
         provisions = []
         
-        for _, employee in employees_df.iterrows():
+        for employee in employees_df.iter_rows(named=True):
             salaire_base = employee.get('salaire_base', 0)
             jours_acquis_non_pris = employee.get('cp_acquis', 0) - employee.get('cp_pris', 0)
             
@@ -641,8 +640,8 @@ class GestionnaireCongesPayes:
                 'provision_cp': round(provision, 2)
             })
         
-        return pd.DataFrame(provisions)
-
+        return pl.DataFrame(provisions)
+    
 # Utility functions for managing rates
 def add_year_to_rates_csv(year: int):
     """Add a new year column to the existing rates CSV"""
