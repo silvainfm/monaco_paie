@@ -866,7 +866,7 @@ class EmailDistributionService:
         """
         if period:
             logs = [log for log in self.email_log 
-                   if log.get('timestamp', '').startswith(period)]
+                if log.get('timestamp', '').startswith(period)]
         else:
             logs = self.email_log
         
@@ -875,14 +875,16 @@ class EmailDistributionService:
         
         df = pl.DataFrame(logs)
         
-        # Ajouter des colonnes calculées
+        # Add calculated columns
         df = df.with_columns([
-            pl.col('success').map_elements(lambda x: 'Envoyé' if x else 'Échec').alias('status')
+            pl.when(pl.col('success'))
+            .then(pl.lit('Envoyé'))
+            .otherwise(pl.lit('Échec'))
+            .alias('status'),
+            pl.col('timestamp').str.to_datetime().dt.date().alias('date'),
+            pl.col('timestamp').str.to_datetime().dt.time().alias('time')
         ])
-        df = df.with_columns([
-            pl.to_datetime(pl.col('timestamp')).dt.date().alias('date'),
-            pl.to_datetime(pl.col('timestamp')).dt.time().alias('time')
-        ])
+        
         return df.select(['date', 'time', 'employee_id', 'email', 'status', 'error'])
 
 
@@ -997,7 +999,6 @@ class EmailConfigManager:
             )
         }
 
-
 class ComplianceAuditLogger:
     """Logger de conformité pour l'audit des envois"""
     
@@ -1097,25 +1098,90 @@ class ComplianceAuditLogger:
         Returns:
             Rapport de conformité
         """
-        period_logs = [
-            log for log in self.audit_data 
-            if log['period'] == period
-        ]
+        if not self.audit_data:
+            return {
+                'period': period,
+                'generated_at': datetime.now().isoformat(),
+                'summary': {'total_emails': 0, 'successful': 0, 'failed': 0, 'success_rate': 0},
+                'by_document_type': {},
+                'daily_breakdown': {},
+                'compliance_checks': {
+                    'all_logged': True,
+                    'audit_trail_complete': True,
+                    'rgpd_compliant': True,
+                    'retention_policy_applied': True
+                }
+            }
         
-        total_sent = len([l for l in period_logs if l['success']])
-        total_failed = len([l for l in period_logs if not l['success']])
+        # Create DataFrame from audit logs
+        df = pl.DataFrame(self.audit_data)
         
-        report = {
+        # Filter by period
+        df_period = df.filter(pl.col('period') == period)
+        
+        if df_period.height == 0:
+            return {
+                'period': period,
+                'generated_at': datetime.now().isoformat(),
+                'summary': {'total_emails': 0, 'successful': 0, 'failed': 0, 'success_rate': 0},
+                'by_document_type': {},
+                'daily_breakdown': {},
+                'compliance_checks': {
+                    'all_logged': True,
+                    'audit_trail_complete': True,
+                    'rgpd_compliant': True,
+                    'retention_policy_applied': True
+                }
+            }
+        
+        # Calculate summary stats
+        total_emails = df_period.height
+        successful = df_period.filter(pl.col('success')).height
+        failed = df_period.filter(~pl.col('success')).height
+        success_rate = (successful / total_emails * 100) if total_emails > 0 else 0
+        
+        # By document type
+        by_doc_type = (
+            df_period
+            .group_by('document_type')
+            .agg([
+                pl.col('success').filter(pl.col('success')).count().alias('sent'),
+                pl.col('success').filter(~pl.col('success')).count().alias('failed')
+            ])
+        )
+        
+        by_document_type = {
+            row['document_type']: {'sent': row['sent'], 'failed': row['failed']}
+            for row in by_doc_type.to_dicts()
+        }
+        
+        # Daily breakdown
+        daily = (
+            df_period
+            .with_columns(pl.col('timestamp').str.slice(0, 10).alias('date'))
+            .group_by('date')
+            .agg([
+                pl.col('success').filter(pl.col('success')).count().alias('sent'),
+                pl.col('success').filter(~pl.col('success')).count().alias('failed')
+            ])
+        )
+        
+        daily_breakdown = {
+            row['date']: {'sent': row['sent'], 'failed': row['failed']}
+            for row in daily.to_dicts()
+        }
+        
+        return {
             'period': period,
             'generated_at': datetime.now().isoformat(),
             'summary': {
-                'total_emails': len(period_logs),
-                'successful': total_sent,
-                'failed': total_failed,
-                'success_rate': (total_sent / len(period_logs) * 100) if period_logs else 0
+                'total_emails': total_emails,
+                'successful': successful,
+                'failed': failed,
+                'success_rate': round(success_rate, 2)
             },
-            'by_document_type': {},
-            'daily_breakdown': {},
+            'by_document_type': by_document_type,
+            'daily_breakdown': daily_breakdown,
             'compliance_checks': {
                 'all_logged': True,
                 'audit_trail_complete': True,
@@ -1123,31 +1189,6 @@ class ComplianceAuditLogger:
                 'retention_policy_applied': True
             }
         }
-        
-        # Par type de document
-        for log in period_logs:
-            doc_type = log['document_type']
-            if doc_type not in report['by_document_type']:
-                report['by_document_type'][doc_type] = {'sent': 0, 'failed': 0}
-            
-            if log['success']:
-                report['by_document_type'][doc_type]['sent'] += 1
-            else:
-                report['by_document_type'][doc_type]['failed'] += 1
-        
-        # Par jour
-        for log in period_logs:
-            date = log['timestamp'][:10]
-            if date not in report['daily_breakdown']:
-                report['daily_breakdown'][date] = {'sent': 0, 'failed': 0}
-            
-            if log['success']:
-                report['daily_breakdown'][date]['sent'] += 1
-            else:
-                report['daily_breakdown'][date]['failed'] += 1
-        
-        return report
-
 
 # Fonction principale pour l'intégration
 def create_email_distribution_system(config_path: str = "config/email_config.json",
