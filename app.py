@@ -566,8 +566,9 @@ def dashboard_page():
     month, year = map(int, st.session_state.current_period.split('-'))
     
     df = system.data_consolidator.load_period_data(st.session_state.current_company, month, year)
-    
-    if df.empty:
+    df = pl.DataFrame(df) if not isinstance(df, pl.DataFrame) else df
+
+    if df.is_empty():
         st.info("Aucune donnée pour cette période. Commencez par importer les données.")
         return
     
@@ -752,7 +753,7 @@ def processing_page():
                 
             if 'processed_data' in st.session_state:
                 df = st.session_state.processed_data
-                    
+                df = pl.DataFrame(df) if not isinstance(df, pl.DataFrame) else df
                 col1, col2, col3 = st.columns(3)
                     
                 with col1:
@@ -1265,8 +1266,9 @@ def pdf_generation_page():
     year = int(period_parts[1])
 
     df = system.data_consolidator.load_period_data(st.session_state.current_company, month, year)
+    df = pl.DataFrame(df) if not isinstance(df, pl.DataFrame) else df
 
-    if df.empty:
+    if df.is_empty():
         st.warning("Aucune donnée pour cette période. Lancez d'abord l'import des données.")
         return
     
@@ -2140,8 +2142,8 @@ def config_page():
         # Use the new AuthManager
         users = AuthManager.list_users()
         if users:
-            users_df = pd.DataFrame(users)
-            st.dataframe(users_df[['username', 'name', 'role']], use_container_width=True)
+            users_df = pl.DataFrame(users)
+            st.dataframe(users_df.select(['username', 'name', 'role']), use_container_width=True)
         else:
             st.info("Aucun utilisateur trouvé")
             

@@ -1,0 +1,10 @@
+category,type,code,description,plafond,taux_2024,taux_2025
+CONSTANT,"",PLAFOND_SS_T1,Plafond Sécurité Sociale Tranche 1,"",3428.0,3428.0
+CONSTANT,"",PLAFOND_SS_T2,Plafond Sécurité Sociale Tranche 2,"",13712.0,13712.0
+CONSTANT,"",BASE_HEURES_LEGALE,Base légale heures mensuelles,"",169.0,169.0
+CONSTANT,"",SMIC_HORAIRE,SMIC horaire Monaco,"",11.65,11.65
+CONSTANT,"",TAUX_HS_125,Taux heures sup 125%,"",1.25,1.25
+CONSTANT,"",TAUX_HS_150,Taux heures sup 150%,"",1.5,1.5
+CONSTANT,"",TICKET_RESTO_VALEUR,Valeur unitaire ticket restaurant,"",9.0,9.0
+CONSTANT,"",TICKET_RESTO_PART_PATRONALE,Part patronale ticket restaurant,"",0.6,0.6
+CONSTANT,"",TICKET_RESTO_PART_SALARIALE,Part salariale ticket restaurant,"",0.4,0.4
