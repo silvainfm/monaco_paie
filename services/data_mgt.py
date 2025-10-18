@@ -1,110 +1,339 @@
-import pyarrow
-import pyarrow.parquet as pq
-HAS_PYARROW = True
-import pandas as pd
-import polars as pl
+"""
+Data Management Module using DuckDB
+Optimized for single-period lookups, cross-period aggregations, and historical analysis
+"""
 
+import duckdb
+import polars as pl
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict
+from typing import List, Dict, Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 DATA_DIR = Path("data")
-PAYSTUBS_DIR = DATA_DIR / "paystubs"
-COMPANIES_DIR = DATA_DIR / "companies"
-CONSOLIDATED_DIR = DATA_DIR / "consolidated"
+DB_PATH = DATA_DIR / "payroll.duckdb"
 
 class DataManager:
-    """Gestion des données de paie"""
+    """DuckDB-based payroll data management with in-memory connection pool"""
+    
+    _conn = None  # Shared connection for 10-15 concurrent users
     
     @staticmethod
-    def load_paystub_data(company_id: str, period: str) -> pl.DataFrame:
-        """Charger les données de paie pour une entreprise"""
-        file_path = DataManager.get_company_file(company_id, period)
-        if file_path.exists():
-            return pl.read_parquet(file_path)
-        else:
-            return DataManager.create_empty_paystub_df()
+    def get_connection() -> duckdb.DuckDBPyConnection:
+        """Get persistent DuckDB connection (thread-safe for read operations)"""
+        if DataManager._conn is None:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            DataManager._conn = duckdb.connect(str(DB_PATH))
+            # Optimize for read-heavy workload
+            DataManager._conn.execute("PRAGMA threads=4")
+            DataManager._conn.execute("PRAGMA memory_limit='2GB'")
+        return DataManager._conn
     
     @staticmethod
-    def save_paystub_data(df: pl.DataFrame, company_id: str, period: str):
-        """Sauvegarder les données de paie"""
-        file_path = DataManager.get_company_file(company_id, period)
-        df.write_parquet(file_path)
+    def init_schema():
+        """Initialize database schema with indexes"""
+        conn = DataManager.get_connection()
+        
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS payroll_data (
+                company_id VARCHAR,
+                period_year INTEGER,
+                period_month INTEGER,
+                matricule VARCHAR,
+                nom VARCHAR,
+                prenom VARCHAR,
+                email VARCHAR,
+                ccss_number VARCHAR,
+                date_entree DATE,
+                date_sortie DATE,
+                anciennete VARCHAR,
+                emploi VARCHAR,
+                qualification VARCHAR,
+                niveau VARCHAR,
+                coefficient VARCHAR,
+                pays_residence VARCHAR,
+                base_heures DOUBLE,
+                heures_payees DOUBLE,
+                taux_horaire DOUBLE,
+                salaire_base DOUBLE,
+                heures_conges_payes DOUBLE,
+                jours_cp_pris DOUBLE,
+                indemnite_cp DOUBLE,
+                heures_absence DOUBLE,
+                type_absence VARCHAR,
+                retenue_absence DOUBLE,
+                prime DOUBLE,
+                type_prime VARCHAR,
+                heures_sup_125 DOUBLE,
+                montant_hs_125 DOUBLE,
+                heures_sup_150 DOUBLE,
+                montant_hs_150 DOUBLE,
+                heures_jours_feries DOUBLE,
+                montant_jours_feries DOUBLE,
+                heures_dimanche DOUBLE,
+                tickets_restaurant DOUBLE,
+                avantage_logement DOUBLE,
+                avantage_transport DOUBLE,
+                remarques VARCHAR,
+                salaire_brut DOUBLE,
+                total_charges_salariales DOUBLE,
+                total_charges_patronales DOUBLE,
+                salaire_net DOUBLE,
+                cout_total_employeur DOUBLE,
+                prelevement_source DOUBLE,
+                statut_validation VARCHAR,
+                edge_case_flag BOOLEAN,
+                edge_case_reason VARCHAR,
+                cumul_brut DOUBLE,
+                cumul_base_ss DOUBLE,
+                cumul_net_percu DOUBLE,
+                cumul_charges_sal DOUBLE,
+                cumul_charges_pat DOUBLE,
+                cp_acquis_n1 DOUBLE,
+                cp_pris_n1 DOUBLE,
+                cp_restants_n1 DOUBLE,
+                cp_acquis_n DOUBLE,
+                cp_pris_n DOUBLE,
+                cp_restants_n DOUBLE,
+                details_charges JSON,
+                tickets_restaurant_details JSON,
+                last_modified TIMESTAMP,
+                PRIMARY KEY (company_id, period_year, period_month, matricule)
+            )
+        """)
+        
+        # Create indexes for common queries
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_company_period 
+            ON payroll_data(company_id, period_year, period_month)
+        """)
+        
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_company_matricule 
+            ON payroll_data(company_id, matricule)
+        """)
+        
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS companies (
+                id VARCHAR PRIMARY KEY,
+                name VARCHAR,
+                siret VARCHAR,
+                address VARCHAR,
+                phone VARCHAR,
+                email VARCHAR,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Ensure sample companies exist
+        count = conn.execute("SELECT COUNT(*) FROM companies").fetchone()[0]
+        if count == 0:
+            conn.execute("""
+                INSERT INTO companies (id, name, siret) VALUES
+                ('CARAX_MONACO', 'CARAX MONACO', '763000000'),
+                ('RG_CAPITAL_SERVICES', 'RG CAPITAL SERVICES', '169000000')
+            """)
+        
+        logger.info("Database schema initialized")
     
     @staticmethod
-    def create_empty_paystub_df() -> pl.DataFrame:
-        """Créer un DataFrame vide avec la structure correcte"""
+    def save_period_data(df: pl.DataFrame, company_id: str, month: int, year: int):
+        """Save period data (upsert operation)"""
+        conn = DataManager.get_connection()
+        
+        # Add metadata if not present
+        if 'company_id' not in df.columns:
+            df = df.with_columns([
+                pl.lit(company_id).alias('company_id'),
+                pl.lit(year).alias('period_year'),
+                pl.lit(month).alias('period_month'),
+                pl.lit(datetime.now()).alias('last_modified')
+            ])
+        
+        # Delete existing period data
+        conn.execute("""
+            DELETE FROM payroll_data 
+            WHERE company_id = ? AND period_year = ? AND period_month = ?
+        """, [company_id, year, month])
+        
+        # Insert new data
+        conn.execute("INSERT INTO payroll_data SELECT * FROM df")
+        
+        logger.info(f"Saved {df.height} records for {company_id} {year}-{month:02d}")
+    
+    @staticmethod
+    def load_period_data(company_id: str, month: int, year: int) -> pl.DataFrame:
+        """Load period data (optimized single-period lookup)"""
+        conn = DataManager.get_connection()
+        
+        result = conn.execute("""
+            SELECT * FROM payroll_data
+            WHERE company_id = ? AND period_year = ? AND period_month = ?
+            ORDER BY matricule
+        """, [company_id, year, month]).pl()
+        
+        if result.height == 0:
+            return DataManager.create_empty_df()
+        
+        return result
+    
+    @staticmethod
+    def get_employee_history(company_id: str, matricule: str, 
+                            start_year: int, start_month: int,
+                            end_year: int, end_month: int) -> pl.DataFrame:
+        """Get employee history across periods (historical analysis)"""
+        conn = DataManager.get_connection()
+        
+        result = conn.execute("""
+            SELECT * FROM payroll_data
+            WHERE company_id = ?
+                AND matricule = ?
+                AND (period_year > ? OR (period_year = ? AND period_month >= ?))
+                AND (period_year < ? OR (period_year = ? AND period_month <= ?))
+            ORDER BY period_year, period_month
+        """, [company_id, matricule, start_year, start_year, start_month, 
+              end_year, end_year, end_month]).pl()
+        
+        return result
+    
+    @staticmethod
+    def get_period_range(company_id: str, 
+                        start_year: int, start_month: int,
+                        end_year: int, end_month: int) -> pl.DataFrame:
+        """Get all payroll data for period range (cross-period aggregation)"""
+        conn = DataManager.get_connection()
+        
+        result = conn.execute("""
+            SELECT * FROM payroll_data
+            WHERE company_id = ?
+                AND (period_year > ? OR (period_year = ? AND period_month >= ?))
+                AND (period_year < ? OR (period_year = ? AND period_month <= ?))
+            ORDER BY period_year, period_month, matricule
+        """, [company_id, start_year, start_year, start_month, 
+              end_year, end_year, end_month]).pl()
+        
+        return result
+    
+    @staticmethod
+    def get_company_summary(company_id: str, year: int, month: int) -> Dict:
+        """Get aggregated summary for a period"""
+        conn = DataManager.get_connection()
+        
+        result = conn.execute("""
+            SELECT 
+                COUNT(*) as employee_count,
+                SUM(salaire_brut) as total_brut,
+                SUM(salaire_net) as total_net,
+                SUM(total_charges_salariales) as total_charges_sal,
+                SUM(total_charges_patronales) as total_charges_pat,
+                SUM(cout_total_employeur) as total_cost,
+                SUM(CASE WHEN edge_case_flag THEN 1 ELSE 0 END) as edge_cases,
+                SUM(CASE WHEN statut_validation = 'Validé' THEN 1 ELSE 0 END) as validated
+            FROM payroll_data
+            WHERE company_id = ? AND period_year = ? AND period_month = ?
+        """, [company_id, year, month]).fetchone()
+        
+        if result[0] == 0:
+            return {}
+        
+        return {
+            'employee_count': result[0],
+            'total_brut': result[1],
+            'total_net': result[2],
+            'total_charges_sal': result[3],
+            'total_charges_pat': result[4],
+            'total_cost': result[5],
+            'edge_cases': result[6],
+            'validated': result[7]
+        }
+    
+    @staticmethod
+    def get_available_periods(company_id: str) -> List[Dict]:
+        """Get list of available periods for a company"""
+        conn = DataManager.get_connection()
+        
+        result = conn.execute("""
+            SELECT DISTINCT period_year, period_month,
+                   COUNT(*) as employee_count,
+                   MAX(last_modified) as last_modified
+            FROM payroll_data
+            WHERE company_id = ?
+            GROUP BY period_year, period_month
+            ORDER BY period_year DESC, period_month DESC
+        """, [company_id]).pl()
+        
+        return result.to_dicts()
+    
+    @staticmethod
+    def get_companies_list() -> List[Dict]:
+        """Get list of companies"""
+        conn = DataManager.get_connection()
+        result = conn.execute("SELECT * FROM companies ORDER BY name").pl()
+        return result.to_dicts()
+    
+    @staticmethod
+    def create_empty_df() -> pl.DataFrame:
+        """Create empty DataFrame with full schema"""
         return pl.DataFrame({
             'matricule': pl.Series([], dtype=pl.Utf8),
             'nom': pl.Series([], dtype=pl.Utf8),
             'prenom': pl.Series([], dtype=pl.Utf8),
             'email': pl.Series([], dtype=pl.Utf8),
+            'ccss_number': pl.Series([], dtype=pl.Utf8),
+            'date_entree': pl.Series([], dtype=pl.Date),
+            'date_sortie': pl.Series([], dtype=pl.Date),
+            'anciennete': pl.Series([], dtype=pl.Utf8),
+            'emploi': pl.Series([], dtype=pl.Utf8),
+            'qualification': pl.Series([], dtype=pl.Utf8),
+            'niveau': pl.Series([], dtype=pl.Utf8),
+            'coefficient': pl.Series([], dtype=pl.Utf8),
+            'pays_residence': pl.Series([], dtype=pl.Utf8),
             'base_heures': pl.Series([], dtype=pl.Float64),
+            'heures_payees': pl.Series([], dtype=pl.Float64),
+            'taux_horaire': pl.Series([], dtype=pl.Float64),
+            'salaire_base': pl.Series([], dtype=pl.Float64),
             'heures_conges_payes': pl.Series([], dtype=pl.Float64),
+            'jours_cp_pris': pl.Series([], dtype=pl.Float64),
+            'indemnite_cp': pl.Series([], dtype=pl.Float64),
             'heures_absence': pl.Series([], dtype=pl.Float64),
             'type_absence': pl.Series([], dtype=pl.Utf8),
+            'retenue_absence': pl.Series([], dtype=pl.Float64),
             'prime': pl.Series([], dtype=pl.Float64),
             'type_prime': pl.Series([], dtype=pl.Utf8),
             'heures_sup_125': pl.Series([], dtype=pl.Float64),
+            'montant_hs_125': pl.Series([], dtype=pl.Float64),
             'heures_sup_150': pl.Series([], dtype=pl.Float64),
+            'montant_hs_150': pl.Series([], dtype=pl.Float64),
             'heures_jours_feries': pl.Series([], dtype=pl.Float64),
+            'montant_jours_feries': pl.Series([], dtype=pl.Float64),
             'heures_dimanche': pl.Series([], dtype=pl.Float64),
             'tickets_restaurant': pl.Series([], dtype=pl.Float64),
             'avantage_logement': pl.Series([], dtype=pl.Float64),
             'avantage_transport': pl.Series([], dtype=pl.Float64),
-            'date_sortie': pl.Series([], dtype=pl.Date),
             'remarques': pl.Series([], dtype=pl.Utf8),
-            'pays_residence': pl.Series([], dtype=pl.Utf8),
-            'salaire_base': pl.Series([], dtype=pl.Float64),
             'salaire_brut': pl.Series([], dtype=pl.Float64),
             'total_charges_salariales': pl.Series([], dtype=pl.Float64),
             'total_charges_patronales': pl.Series([], dtype=pl.Float64),
             'salaire_net': pl.Series([], dtype=pl.Float64),
+            'cout_total_employeur': pl.Series([], dtype=pl.Float64),
+            'prelevement_source': pl.Series([], dtype=pl.Float64),
             'statut_validation': pl.Series([], dtype=pl.Utf8),
             'edge_case_flag': pl.Series([], dtype=pl.Boolean),
-            'edge_case_reason': pl.Series([], dtype=pl.Utf8)
+            'edge_case_reason': pl.Series([], dtype=pl.Utf8),
+            'cumul_brut': pl.Series([], dtype=pl.Float64),
+            'cumul_base_ss': pl.Series([], dtype=pl.Float64),
+            'cumul_net_percu': pl.Series([], dtype=pl.Float64),
+            'cumul_charges_sal': pl.Series([], dtype=pl.Float64),
+            'cumul_charges_pat': pl.Series([], dtype=pl.Float64),
+            'cp_acquis_n1': pl.Series([], dtype=pl.Float64),
+            'cp_pris_n1': pl.Series([], dtype=pl.Float64),
+            'cp_restants_n1': pl.Series([], dtype=pl.Float64),
+            'cp_acquis_n': pl.Series([], dtype=pl.Float64),
+            'cp_pris_n': pl.Series([], dtype=pl.Float64),
+            'cp_restants_n': pl.Series([], dtype=pl.Float64)
         })
-    
-    @staticmethod
-    def get_companies_list() -> List[Dict]:
-        """Obtenir la liste des entreprises"""
-        companies_file = COMPANIES_DIR / "companies.parquet"
-        if companies_file.exists():
-            df = pl.read_parquet(companies_file)
-            return df.to_dicts()
-        else:
-            sample_companies = pl.DataFrame({
-                'id': ['CARAX_MONACO', 'RG_CAPITAL_SERVICES'],
-                'name': ['CARAX MONACO', 'RG CAPITAL SERVICES'],
-                'siret': ['763000000', '169000000']
-            })
-            sample_companies.write_parquet(companies_file)
-            return sample_companies.to_dicts()
-        
-class DataConsolidation:
-    """Gestion de la consolidation des données par mois/année"""
-    
-    @staticmethod
-    def save_period_data(df: pl.DataFrame, company_id: str, year: int, month: int) -> None:
-        """Sauvegarder les données pour une période"""
-        file_path = DataConsolidation.get_period_file(company_id, year, month)
-        
-        df = df.with_columns([
-            pl.lit(company_id).alias('company_id'),
-            pl.lit(year).alias('period_year'),
-            pl.lit(month).alias('period_month'),
-            pl.lit(f"{month:02d}-{year}").alias('period_str'),
-            pl.lit(datetime.now()).alias('last_modified')
-        ])
-        
-        df.write_parquet(file_path)
-    
-    @staticmethod
-    def load_period_data(company_id: str, year: int, month: int) -> pl.DataFrame:
-        """Charger les données pour une période"""
-        file_path = DataConsolidation.get_period_file(company_id, year, month)
-        
-        if file_path.exists():
-            return pl.read_parquet(file_path)
-        
-        return DataManager.create_empty_paystub_df()
+
+# Backward compatibility alias
+DataConsolidation = DataManager
