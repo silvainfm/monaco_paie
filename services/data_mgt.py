@@ -335,5 +335,87 @@ class DataManager:
             'cp_restants_n': pl.Series([], dtype=pl.Float64)
         })
 
+class DataAuditLogger:
+    """Audit logger for data operations"""
+    
+    @staticmethod
+    def init_audit_table():
+        """Initialize audit log table"""
+        conn = DataManager.get_connection()
+        
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id INTEGER PRIMARY KEY,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                user VARCHAR,
+                action VARCHAR,
+                company_id VARCHAR,
+                period_year INTEGER,
+                period_month INTEGER,
+                details JSON,
+                ip_address VARCHAR,
+                record_count INTEGER
+            )
+        """)
+        
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_audit_timestamp 
+            ON audit_log(timestamp DESC)
+        """)
+        
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_audit_company 
+            ON audit_log(company_id, period_year, period_month)
+        """)
+    
+    @staticmethod
+    def log(user: str, action: str, company_id: str, year: int, month: int,
+            details: Optional[Dict] = None, record_count: Optional[int] = None):
+        """Log data operation"""
+        conn = DataManager.get_connection()
+        
+        import json
+        details_json = json.dumps(details) if details else None
+        
+        conn.execute("""
+            INSERT INTO audit_log 
+            (user, action, company_id, period_year, period_month, details, record_count)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, [user, action, company_id, year, month, details_json, record_count])
+    
+    @staticmethod
+    def get_recent_logs(limit: int = 100) -> pl.DataFrame:
+        """Get recent audit logs"""
+        conn = DataManager.get_connection()
+        result = conn.execute("""
+            SELECT * FROM audit_log
+            ORDER BY timestamp DESC
+            LIMIT ?
+        """, [limit]).pl()
+        return result
+    
+    @staticmethod
+    def get_period_logs(company_id: str, year: int, month: int) -> pl.DataFrame:
+        """Get logs for specific period"""
+        conn = DataManager.get_connection()
+        result = conn.execute("""
+            SELECT * FROM audit_log
+            WHERE company_id = ? AND period_year = ? AND period_month = ?
+            ORDER BY timestamp DESC
+        """, [company_id, year, month]).pl()
+        return result
+    
+    @staticmethod
+    def get_user_activity(user: str, days: int = 30) -> pl.DataFrame:
+        """Get user activity for last N days"""
+        conn = DataManager.get_connection()
+        result = conn.execute("""
+            SELECT * FROM audit_log
+            WHERE user = ? 
+                AND timestamp >= CURRENT_TIMESTAMP - INTERVAL ? DAY
+            ORDER BY timestamp DESC
+        """, [user, days]).pl()
+        return result
+
 # Backward compatibility alias
 DataConsolidation = DataManager

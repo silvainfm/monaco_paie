@@ -99,6 +99,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+from services.data_mgt import DataManager
+DataManager.init_schema()
+
 # Add custom CSS right after st.set_page_config():
 
 st.markdown("""
