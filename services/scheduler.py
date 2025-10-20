@@ -7,6 +7,7 @@ Provides automatic monthly payroll processing with scheduling capabilities
 import schedule
 import time
 import logging
+import polars as pl
 from datetime import datetime, date, timedelta
 from pathlib import Path
 import json
@@ -317,8 +318,7 @@ class PayrollScheduler:
                 processed_data.append(payslip)
             
             # Save processed data
-            import pandas as pd
-            processed_df = pd.DataFrame(processed_data)
+            processed_df = pl.DataFrame(processed_data)
             data_consolidator.save_period_data(processed_df, company_id, year, month)
             
             # Generate PDFs
