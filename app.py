@@ -964,7 +964,86 @@ def validation_page():
                                 st.markdown(f"🔄 `{current_value:.2f}` → `{new_value:.2f}`")
                             else:
                                 st.markdown(f"`{current_value:.2f}`")
-                
+
+                    # Initialize additional rubrics storage
+                    additional_rubrics_key = f"additional_rubrics_{matricule}"
+                    if additional_rubrics_key not in st.session_state:
+                        st.session_state[additional_rubrics_key] = []
+
+                    # Display additional rubrics that were added
+                    for added_rubric in st.session_state[additional_rubrics_key]:
+                        field = added_rubric['field']
+                        current_value = safe_get_numeric(row, field, 0.0)
+
+                        col1, col2, col3 = st.columns([3, 2, 2])
+                        with col1:
+                            st.markdown(f"**{added_rubric['label']}** `{added_rubric['code']}`")
+                        with col2:
+                            # Show field type based on name
+                            if 'heures' in field or 'jours' in field:
+                                new_value = st.number_input(
+                                    f"Quantité",
+                                    value=float(current_value),
+                                    step=0.5,
+                                    format="%.2f",
+                                    key=f"sal_{matricule}_{field}",
+                                    label_visibility="collapsed"
+                                )
+                            else:
+                                new_value = st.number_input(
+                                    f"Montant (€)",
+                                    value=float(current_value),
+                                    step=10.0,
+                                    format="%.2f",
+                                    key=f"sal_{matricule}_{field}",
+                                    label_visibility="collapsed"
+                                )
+
+                        with col3:
+                            if abs(new_value - current_value) > 0.01:
+                                st.session_state[mod_key][field] = new_value
+                                st.markdown(f"🔄 `{current_value:.2f}` → `{new_value:.2f}`")
+                            else:
+                                st.markdown(f"`{current_value:.2f}`")
+
+                    # Dropdown to add new rubric
+                    st.markdown("---")
+                    st.markdown("##### ➕ Ajouter une ligne")
+
+                    # Get available rubrics for this employee
+                    available_rubrics = get_available_rubrics_for_employee(row)
+
+                    if available_rubrics:
+                        # Create dropdown options
+                        rubric_options = ["-- Sélectionner une rubrique --"] + [
+                            f"{r['code']} - {r['label']}" for r in available_rubrics
+                        ]
+
+                        selected = st.selectbox(
+                            "Rubrique à ajouter",
+                            options=rubric_options,
+                            key=f"add_rubric_{matricule}",
+                            label_visibility="collapsed"
+                        )
+
+                        if selected != "-- Sélectionner une rubrique --":
+                            # Find the selected rubric
+                            selected_code = selected.split(" - ")[0]
+                            selected_rubric = next(
+                                (r for r in available_rubrics if r['code'] == selected_code),
+                                None
+                            )
+
+                            if selected_rubric:
+                                # Add to additional rubrics
+                                if selected_rubric not in st.session_state[additional_rubrics_key]:
+                                    st.session_state[additional_rubrics_key].append(selected_rubric)
+                                    # Initialize the field value to 0 in modifications
+                                    st.session_state[mod_key][selected_rubric['field']] = 0.0
+                                    st.rerun()
+                    else:
+                        st.info("Toutes les rubriques disponibles sont déjà affichées")
+
                 # TAB 2: SOCIAL CHARGES - COMBINED FORMAT
                 with tab2:
                     st.markdown("##### Cotisations sociales")
@@ -1203,7 +1282,140 @@ def validation_page():
                     
                     total_cols[2].markdown(f"**{total_sal:.2f}€**")
                     total_cols[5].markdown(f"**{total_pat:.2f}€**")
-                
+
+                    # Initialize additional charges storage
+                    additional_charges_key = f"additional_charges_{matricule}"
+                    if additional_charges_key not in st.session_state:
+                        st.session_state[additional_charges_key] = []
+
+                    # Display additional charges that were added
+                    for added_charge in st.session_state[additional_charges_key]:
+                        cols = st.columns([3, 1.5, 1.5, 2, 1.5, 2])
+
+                        # Charge name
+                        cols[0].markdown(f"**{added_charge['label']}**")
+                        cols[0].caption(f"Code: {added_charge['code']}")
+
+                        # Get current values
+                        current_sal = charges_sal.get(added_charge['code'], 0)
+                        current_pat = charges_pat.get(added_charge['code'], 0)
+
+                        # Default base to salaire_brut
+                        salaire_brut = safe_get_numeric(row, 'salaire_brut', 0)
+                        current_base = st.session_state[bases_key].get(
+                            added_charge['code'],
+                            salaire_brut
+                        )
+
+                        # Salarial rate (display only)
+                        if added_charge['has_salarial']:
+                            cols[1].markdown(f"{added_charge['taux_sal']:.2f}%")
+                        else:
+                            cols[1].markdown("-")
+
+                        # Salarial amount (editable)
+                        if added_charge['has_salarial']:
+                            new_sal = cols[2].number_input(
+                                "Sal",
+                                value=float(current_sal),
+                                step=1.0,
+                                format="%.2f",
+                                key=f"charge_sal_{matricule}_{added_charge['code']}",
+                                label_visibility="collapsed"
+                            )
+                            if abs(new_sal - current_sal) > 0.01:
+                                if 'charges_salariales' not in st.session_state[mod_key]:
+                                    st.session_state[mod_key]['charges_salariales'] = {}
+                                st.session_state[mod_key]['charges_salariales'][added_charge['code']] = new_sal
+                        else:
+                            cols[2].markdown("-")
+
+                        # Base (editable)
+                        new_base = cols[3].number_input(
+                            "Base",
+                            value=float(current_base),
+                            step=100.0,
+                            format="%.2f",
+                            key=f"charge_base_{matricule}_{added_charge['code']}",
+                            label_visibility="collapsed"
+                        )
+                        if abs(new_base - current_base) > 0.01:
+                            st.session_state[bases_key][added_charge['code']] = new_base
+                            if 'charge_bases' not in st.session_state[mod_key]:
+                                st.session_state[mod_key]['charge_bases'] = {}
+                            st.session_state[mod_key]['charge_bases'][added_charge['code']] = new_base
+
+                        # Patronal rate (display only)
+                        if added_charge['has_patronal']:
+                            cols[4].markdown(f"{added_charge['taux_pat']:.2f}%")
+                        else:
+                            cols[4].markdown("-")
+
+                        # Patronal amount (editable)
+                        if added_charge['has_patronal']:
+                            new_pat = cols[5].number_input(
+                                "Pat",
+                                value=float(current_pat),
+                                step=1.0,
+                                format="%.2f",
+                                key=f"charge_pat_{matricule}_{added_charge['code']}",
+                                label_visibility="collapsed"
+                            )
+                            if abs(new_pat - current_pat) > 0.01:
+                                if 'charges_patronales' not in st.session_state[mod_key]:
+                                    st.session_state[mod_key]['charges_patronales'] = {}
+                                st.session_state[mod_key]['charges_patronales'][added_charge['code']] = new_pat
+                        else:
+                            cols[5].markdown("-")
+
+                    # Dropdown to add new charge
+                    st.markdown("---")
+                    st.markdown("##### ➕ Ajouter une cotisation")
+
+                    # Get available charges for this employee
+                    available_charges = get_available_charges_for_employee(row)
+
+                    if available_charges:
+                        # Create dropdown options
+                        charge_options = ["-- Sélectionner une cotisation --"] + [
+                            f"{c['code']} - {c['label']}" for c in available_charges
+                        ]
+
+                        selected_charge = st.selectbox(
+                            "Cotisation à ajouter",
+                            options=charge_options,
+                            key=f"add_charge_{matricule}",
+                            label_visibility="collapsed"
+                        )
+
+                        if selected_charge != "-- Sélectionner une cotisation --":
+                            # Find the selected charge
+                            selected_code = selected_charge.split(" - ")[0]
+                            selected_charge_obj = next(
+                                (c for c in available_charges if c['code'] == selected_code),
+                                None
+                            )
+
+                            if selected_charge_obj:
+                                # Add to additional charges
+                                if selected_charge_obj not in st.session_state[additional_charges_key]:
+                                    st.session_state[additional_charges_key].append(selected_charge_obj)
+                                    # Initialize charges in modifications
+                                    if 'charges_salariales' not in st.session_state[mod_key]:
+                                        st.session_state[mod_key]['charges_salariales'] = {}
+                                    if 'charges_patronales' not in st.session_state[mod_key]:
+                                        st.session_state[mod_key]['charges_patronales'] = {}
+
+                                    # Set initial values to 0
+                                    if selected_charge_obj['has_salarial']:
+                                        st.session_state[mod_key]['charges_salariales'][selected_code] = 0.0
+                                    if selected_charge_obj['has_patronal']:
+                                        st.session_state[mod_key]['charges_patronales'][selected_code] = 0.0
+
+                                    st.rerun()
+                    else:
+                        st.info("Toutes les cotisations disponibles sont déjà affichées")
+
                 # Action buttons
                 st.markdown("---")
                 col1, col2, col3 = st.columns([2, 2, 3])
@@ -1852,7 +2064,7 @@ def get_salary_rubrics() -> List[Dict]:
     """Get salary element rubrics from pdf_generation"""
     from services.pdf_generation import PaystubPDFGenerator
     codes = PaystubPDFGenerator.RUBRIC_CODES
-    
+
     return [
         {'code': codes['salaire_base'], 'label': 'Salaire Mensuel', 'field': 'salaire_base'},
         {'code': codes['prime_anciennete'], 'label': "Prime d'ancienneté", 'field': 'prime_anciennete'},
@@ -1867,10 +2079,71 @@ def get_salary_rubrics() -> List[Dict]:
         {'code': codes['tickets_resto'], 'label': 'Tickets restaurant', 'field': 'tickets_restaurant'},
     ]
 
+def get_all_available_salary_rubrics(year: int = None) -> List[Dict]:
+    """Get all available salary rubrics including constants from MonacoPayrollConstants"""
+    from services.payroll_calculations import MonacoPayrollConstants
+    from services.pdf_generation import PaystubPDFGenerator
+    from pathlib import Path
+
+    all_rubrics = []
+
+    # Add standard salary rubrics
+    codes = PaystubPDFGenerator.RUBRIC_CODES
+    all_rubrics.extend([
+        {'code': codes['salaire_base'], 'label': 'Salaire Mensuel', 'field': 'salaire_base'},
+        {'code': codes['prime_anciennete'], 'label': "Prime d'ancienneté", 'field': 'prime_anciennete'},
+        {'code': codes['heures_sup_125'], 'label': 'Heures sup. 125%', 'field': 'heures_sup_125'},
+        {'code': codes['heures_sup_150'], 'label': 'Heures sup. 150%', 'field': 'heures_sup_150'},
+        {'code': codes['prime_performance'], 'label': 'Prime performance', 'field': 'prime'},
+        {'code': codes['prime_autre'], 'label': 'Autre prime', 'field': 'prime_autre'},
+        {'code': codes['jours_feries'], 'label': 'Jours fériés 100%', 'field': 'heures_jours_feries'},
+        {'code': codes['absence_maladie'], 'label': 'Absence maladie', 'field': 'heures_absence'},
+        {'code': codes['absence_cp'], 'label': 'Absence congés payés', 'field': 'heures_conges_payes'},
+        {'code': codes['indemnite_cp'], 'label': 'Indemnité congés payés', 'field': 'jours_conges_pris'},
+        {'code': codes['tickets_resto'], 'label': 'Tickets restaurant', 'field': 'tickets_restaurant'},
+        {'code': codes['maintien_salaire'], 'label': 'Maintien de salaire', 'field': 'maintien_salaire'},
+    ])
+
+    # Add constants from MonacoPayrollConstants CSV
+    csv_path = Path("config") / "payroll_rates.csv"
+    if csv_path.exists():
+        try:
+            df = pl.read_csv(csv_path)
+            constants_df = df.filter(pl.col("category") == "CONSTANT")
+            for row in constants_df.iter_rows(named=True):
+                const_code = row["code"]
+                const_desc = row.get("description", const_code)
+                # Use the constant code as the field name (lowercase)
+                all_rubrics.append({
+                    'code': const_code,
+                    'label': const_desc,
+                    'field': const_code.lower()
+                })
+        except Exception as e:
+            print(f"Error loading constants: {e}")
+
+    return all_rubrics
+
+def get_available_rubrics_for_employee(employee_data: Dict, year: int = None) -> List[Dict]:
+    """Get rubrics not currently displayed for this employee"""
+    all_rubrics = get_all_available_salary_rubrics(year)
+
+    # Get currently displayed fields (non-zero values)
+    displayed_fields = set()
+    for rubric in all_rubrics:
+        field = rubric['field']
+        if safe_get_numeric(employee_data, field, 0) != 0:
+            displayed_fields.add(field)
+
+    # Filter out displayed rubrics
+    available = [r for r in all_rubrics if r['field'] not in displayed_fields]
+
+    return available
+
 def get_charge_rubrics() -> Dict[str, List[Dict]]:
     """Get social charge rubrics from payroll_calculations"""
     from services.payroll_calculations import ChargesSocialesMonaco
-    
+
     salariales = []
     for key, params in ChargesSocialesMonaco.COTISATIONS_SALARIALES.items():
         salariales.append({
@@ -1879,7 +2152,7 @@ def get_charge_rubrics() -> Dict[str, List[Dict]]:
             'taux': params['taux'],
             'plafond': params['plafond']
         })
-    
+
     patronales = []
     for key, params in ChargesSocialesMonaco.COTISATIONS_PATRONALES.items():
         patronales.append({
@@ -1888,11 +2161,65 @@ def get_charge_rubrics() -> Dict[str, List[Dict]]:
             'taux': params['taux'],
             'plafond': params['plafond']
         })
-    
+
     return {
         'salariales': salariales,
         'patronales': patronales
     }
+
+def get_available_charges_for_employee(employee_data: Dict, year: int = None) -> List[Dict]:
+    """Get charge codes not currently displayed for this employee"""
+    from services.payroll_calculations import ChargesSocialesMonaco
+
+    # Initialize charges calculator
+    charges_calc = ChargesSocialesMonaco(year)
+
+    # Get all available charge codes
+    all_charges = {}
+    for code, params in charges_calc.COTISATIONS_SALARIALES.items():
+        all_charges[code] = {
+            'code': code,
+            'label': params['description'],
+            'taux_sal': params['taux'],
+            'taux_pat': 0,
+            'plafond': params['plafond'],
+            'has_salarial': True,
+            'has_patronal': False
+        }
+
+    # Merge with patronal charges
+    for code, params in charges_calc.COTISATIONS_PATRONALES.items():
+        if code in all_charges:
+            all_charges[code]['taux_pat'] = params['taux']
+            all_charges[code]['has_patronal'] = True
+        else:
+            all_charges[code] = {
+                'code': code,
+                'label': params['description'],
+                'taux_sal': 0,
+                'taux_pat': params['taux'],
+                'plafond': params['plafond'],
+                'has_salarial': False,
+                'has_patronal': True
+            }
+
+    # Get currently displayed charges
+    details_charges = employee_data.get('details_charges', {})
+    charges_sal = details_charges.get('charges_salariales', {})
+    charges_pat = details_charges.get('charges_patronales', {})
+
+    displayed_codes = set()
+    for code in charges_sal.keys():
+        if charges_sal.get(code, 0) != 0:
+            displayed_codes.add(code)
+    for code in charges_pat.keys():
+        if charges_pat.get(code, 0) != 0:
+            displayed_codes.add(code)
+
+    # Filter out displayed charges
+    available = [charge for code, charge in all_charges.items() if code not in displayed_codes]
+
+    return available
 
 def log_modification(matricule: str, field: str, old_value, new_value, user: str, reason: str):
     """Log paystub modification for audit trail"""
