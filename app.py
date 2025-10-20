@@ -102,8 +102,7 @@ st.set_page_config(
 from services.data_mgt import DataManager
 DataManager.init_schema()
 
-# Add custom CSS right after st.set_page_config():
-
+# Custom CSS
 st.markdown("""
 <style>
     /* Import clean font */
@@ -267,9 +266,6 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
-
-# Replace section headers throughout with:
-# st.markdown("## Section Title") instead of st.header() or st.subheader()
 
 # Constants
 DATA_DIR = Path("data")
@@ -1164,8 +1160,10 @@ def validation_page():
                                 )
                                 
                                 # Update DataFrame
-                                for key, value in updated.items():
-                                    df.at[idx, key] = value
+                                df = df.with_columns([
+                                    pl.lit(value).alias(key) if key in df.columns else pl.lit(None).alias(key)
+                                    for key, value in updated.items()
+                                    ])
                                 
                                 st.session_state.processed_data = df
                                 st.success("✅ Recalcul effectué!")
@@ -1877,7 +1875,7 @@ def recalculate_employee_payslip(employee_data: Dict, modifications: Dict) -> Di
             # Force numeric conversion
             if isinstance(value, dict):
                 updated_data[key] = 0.0
-            elif pd.isna(value) or value is None:
+            elif pl.is_nan(value) or value is None:
                 updated_data[key] = 0.0
             else:
                 try:
@@ -2001,7 +1999,7 @@ def clean_employee_data_for_pdf(employee_dict: Dict) -> Dict:
                 cleaned[key] = 0
             elif isinstance(value, (list, tuple)):
                 cleaned[key] = 0
-            elif pd.isna(value) or value is None:
+            elif pl.is_nan(value) or value is None:
                 cleaned[key] = 0
             elif isinstance(value, (int, float, np.integer, np.floating)):
                 cleaned[key] = float(value)
