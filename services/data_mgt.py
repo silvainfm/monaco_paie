@@ -274,6 +274,64 @@ class DataManager:
         return result.to_dicts()
     
     @staticmethod
+    def get_company_creation_date(company_id: str) -> Optional[datetime]:
+        """Get the creation date of a company"""
+        conn = DataManager.get_connection()
+        
+        result = conn.execute("""
+            SELECT created_at FROM companies
+            WHERE id = ?
+        """, [company_id]).fetchone()
+        
+        if result and result[0]:
+            return result[0]
+        
+        return None
+
+    @staticmethod
+    def get_available_period_strings(company_id: str) -> List[str]:
+        """
+        Get list of all available periods for a company as strings
+        
+        Returns:
+            List of periods in format "MM-YYYY", sorted newest first
+        """
+        conn = DataManager.get_connection()
+        
+        result = conn.execute("""
+            SELECT DISTINCT 
+                LPAD(CAST(period_month AS VARCHAR), 2, '0') || '-' || CAST(period_year AS VARCHAR) as period
+            FROM payroll_data
+            WHERE company_id = ?
+            ORDER BY period_year DESC, period_month DESC
+        """, [company_id]).fetchall()
+        
+        return [row[0] for row in result]
+
+    @staticmethod
+    def get_company_age_months(company_id: str) -> Optional[float]:
+        """
+        Get the age of a company in months
+        
+        Returns:
+            Number of months since company creation, or None if not found
+        """
+        creation_date = DataManager.get_company_creation_date(company_id)
+        
+        if not creation_date:
+            return None
+        
+        now = datetime.now()
+        months_diff = (now.year - creation_date.year) * 12 + (now.month - creation_date.month)
+        
+        # Add fractional month based on days
+        days_in_current_month = 30  # Approximation
+        days_diff = now.day - creation_date.day
+        months_diff += days_diff / days_in_current_month
+        
+        return max(0, months_diff)
+    
+    @staticmethod
     def create_empty_df() -> pl.DataFrame:
         """Create empty DataFrame with full schema"""
         return pl.DataFrame({

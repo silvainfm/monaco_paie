@@ -769,9 +769,68 @@ def processing_page():
             st.error(f"Erreur: {report.get('error', 'Erreur inconnue')}")
 
 def validation_page():
-    """Page de validation des cas particuliers avec édition"""
+    """Page de validation des cas particuliers avec édition - restricted to last 2 periods"""
     st.header("✅ Validation et Modification des Paies")
     
+    if not st.session_state.current_company or not st.session_state.current_period:
+        st.warning("Sélectionnez une entreprise et une période")
+        return
+    
+    # CHECK PERIOD EDIT PERMISSION
+    is_new_company = AuthManager.is_new_company(st.session_state.current_company)
+    available_periods = DataManager.get_available_period_strings(st.session_state.current_company)
+    
+    if not is_new_company:
+        # Not a new company - restrict to last 2 periods
+        if len(available_periods) < 2:
+            editable_periods = available_periods
+        else:
+            editable_periods = available_periods[:2]  # Most recent 2 periods
+        
+        current_period = st.session_state.current_period
+        can_edit = current_period in editable_periods
+        
+        if not can_edit:
+            st.error(f"""
+            ⚠️ **Modification interdite pour cette période**
+            
+            Les modifications ne sont autorisées que pour les **2 dernières périodes**.
+            
+            **Périodes modifiables actuellement:**
+            {', '.join(editable_periods) if editable_periods else 'Aucune'}
+            
+            **Période sélectionnée:** {current_period}
+            
+            Pour modifier cette période, veuillez contacter l'administrateur.
+            """)
+            
+            # Show view-only mode
+            st.info("Mode consultation uniquement pour cette période")
+            _show_read_only_validation()
+            return
+        else:
+            # Show which periods are editable
+            st.info(f"""
+            **Modification autorisée**
+            
+            Périodes modifiables: {', '.join(editable_periods)}
+            """)
+    else:
+        # Show company age for transparency
+        age_months = DataManager.get_company_age_months(st.session_state.current_company)
+        if age_months is not None:
+            st.success(f"""
+            **Nouvelle entreprise détectée** (créée il y a {age_months:.1f} mois)
+            
+            Toutes les périodes sont modifiables pour les nouvelles entreprises.
+            """)
+        else:
+            st.success("""
+            **Nouvelle entreprise détectée**
+            
+            Toutes les périodes sont modifiables pour les nouvelles entreprises.
+            """)
+
     if 'edge_cases' not in st.session_state:
         st.session_state.edge_cases = []
     
@@ -2040,6 +2099,104 @@ def safe_get_numeric(row: Dict, field: str, default: float = 0.0) -> float:
     except (TypeError, ValueError, AttributeError):
         return default
     
+def _show_read_only_validation():
+    """Show read-only view of payslips when editing is not allowed"""
+    
+    if 'processed_data' not in st.session_state or st.session_state.processed_data.is_empty():
+        st.info("Aucune donnée disponible pour cette période.")
+        return
+    
+    df = st.session_state.processed_data
+    
+    # Filter and search bar
+    col1, col2 = st.columns([2, 2])
+    with col1:
+        search = st.text_input("🔍 Rechercher (matricule, nom, prénom)", "", key="readonly_search")
+    with col2:
+        status_filter = st.selectbox("Filtrer par statut", 
+                                     ["Tous", "À vérifier", "Validés"],
+                                     key="readonly_status")
+    
+    # Apply filters
+    filtered_df = df
+    if search:
+        filtered_df = filtered_df.filter(
+            pl.col('matricule').cast(pl.Utf8).str.contains(f"(?i){search}") |
+            pl.col('nom').cast(pl.Utf8).str.contains(f"(?i){search}") |
+            pl.col('prenom').cast(pl.Utf8).str.contains(f"(?i){search}")
+        )
+    
+    if status_filter == "À vérifier":
+        filtered_df = filtered_df.filter(pl.col('edge_case_flag') == True)
+    elif status_filter == "Validés":
+        filtered_df = filtered_df.filter(pl.col('statut_validation') == True)
+    
+    st.markdown("---")
+    
+    # Display employees in read-only mode
+    if filtered_df.is_empty():
+        st.info("Aucun employé trouvé avec ces critères")
+        return
+    
+    for row in filtered_df.iter_rows(named=True):
+        matricule = row['matricule']
+        is_edge_case = row.get('edge_case_flag', False)
+        is_validated = row.get('statut_validation', False) == True
+        
+        status_icon = "⚠️" if is_edge_case else ("✅" if is_validated else "⏳")
+        title = f"{status_icon} {row['nom']} {row['prenom']} - {matricule} [LECTURE SEULE]"
+        
+        with st.expander(title):
+            # Show issues if any
+            if is_edge_case:
+                st.warning(f"**Raison:** {row.get('edge_case_reason', 'Non spécifiée')}")
+            
+            # Summary metrics
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Salaire brut", f"{row.get('salaire_brut', 0):,.2f} €")
+            with col2:
+                st.metric("Charges sal.", f"{row.get('total_charges_salariales', 0):,.2f} €")
+            with col3:
+                st.metric("Salaire net", f"{row.get('salaire_net', 0):,.2f} €")
+            with col4:
+                st.metric("Coût employeur", f"{row.get('cout_total_employeur', 0):,.2f} €")
+            
+            # Show detailed breakdown in tabs
+            tab1, tab2 = st.tabs(["💰 Éléments de Salaire", "📊 Charges Sociales"])
+            
+            with tab1:
+                st.markdown("**Éléments de rémunération:**")
+                salary_rubrics = get_salary_rubrics()
+                for rubric in salary_rubrics:
+                    field = rubric['field']
+                    value = safe_get_numeric(row, field, 0.0)
+                    if value > 0:
+                        st.text(f"• {rubric['label']} ({rubric['code']}): {value:.2f}")
+            
+            with tab2:
+                details_charges = row.get('details_charges', {})
+                if isinstance(details_charges, dict):
+                    charges_sal = details_charges.get('charges_salariales', {})
+                    charges_pat = details_charges.get('charges_patronales', {})
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown("**Charges salariales:**")
+                        if isinstance(charges_sal, dict):
+                            for code, amount in charges_sal.items():
+                                val = safe_get_charge_value(details_charges, 'charges_salariales', code)
+                                if val > 0:
+                                    st.text(f"• {code}: {val:.2f} €")
+                    
+                    with col2:
+                        st.markdown("**Charges patronales:**")
+                        if isinstance(charges_pat, dict):
+                            for code, amount in charges_pat.items():
+                                val = safe_get_charge_value(details_charges, 'charges_patronales', code)
+                                if val > 0:
+                                    st.text(f"• {code}: {val:.2f} €")
+
 # ============================================================================
 # ADMIN USER MANAGEMENT
 # ============================================================================

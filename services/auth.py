@@ -416,3 +416,32 @@ class AuthManager:
         """Check if user has comptable role"""
         user_info = AuthManager.get_user_info(username)
         return user_info and user_info["role"] == "comptable"
+    
+    @staticmethod
+    def is_new_company(company_id: str, threshold_months: int = 3) -> bool:
+        """
+        Check if a company is considered 'new' (created within threshold_months)
+        
+        Args:
+            company_id: Company identifier
+            threshold_months: Number of months to consider company as new (default 3)
+            
+        Returns:
+            True if company is new, False otherwise
+        """
+        from services.data_mgt import DataManager
+        
+        try:
+            # Get company age in months
+            age_months = DataManager.get_company_age_months(company_id)
+            
+            if age_months is None:
+                # No creation date found - assume new for safety
+                logger.warning(f"No creation date found for company {company_id}, treating as new")
+                return True
+            
+            return age_months <= threshold_months
+            
+        except Exception as e:
+            logger.error(f"Error checking company age: {e}")
+            return True  # Default to new on error for safety
