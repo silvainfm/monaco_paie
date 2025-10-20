@@ -245,14 +245,23 @@ class ExcelImportExport:
     @classmethod
     def import_from_excel(cls, file_path: Union[str, Path, io.BytesIO]) -> pl.DataFrame:
         """Importer les données depuis un fichier Excel"""
-        df = pl.read_excel(file_path, sheet_id=1)
-        
+        # Specify schema to preserve leading zeros in matricule
+        schema_overrides = {"Matricule": pl.Utf8}
+
+        df = pl.read_excel(file_path, sheet_id=1, schema_overrides=schema_overrides)
+
         is_valid, errors = cls.validate_excel_format(df)
         if not is_valid:
             raise ValueError(f"Erreurs de validation: {'; '.join(errors)}")
-        
+
         df = df.rename(cls.EXCEL_COLUMN_MAPPING)
-        
+
+        # Ensure matricule is string after rename
+        if 'matricule' in df.columns:
+            df = df.with_columns(
+                pl.col('matricule').cast(pl.Utf8, strict=False)
+            )
+
         # Add missing columns with defaults
         for col in cls.EXCEL_COLUMN_MAPPING.values():
             if col not in df.columns:
@@ -266,25 +275,25 @@ class ExcelImportExport:
                     df = df.with_columns(pl.lit('performance').alias(col))
                 else:
                     df = df.with_columns(pl.lit(None).alias(col))
-        
+
         numeric_columns = [
             'base_heures', 'salaire_base', 'heures_sup_125', 'heures_sup_150',
             'heures_jours_feries', 'heures_dimanche', 'heures_absence',
             'prime', 'tickets_restaurant', 'avantage_logement', 'avantage_transport',
             'heures_conges_payes', 'taux_prelevement_source'
         ]
-        
+
         for col in numeric_columns:
             if col in df.columns:
                 df = df.with_columns(
                     pl.col(col).cast(pl.Float64, strict=False).fill_null(0.0)
                 )
-        
+
         if 'date_sortie' in df.columns:
             df = df.with_columns(
                 pl.col('date_sortie').str.strptime(pl.Date, "%Y-%m-%d", strict=False)
             )
-        
+
         if 'pays_residence' in df.columns:
             df = df.with_columns(
                 pl.col('pays_residence')
@@ -292,14 +301,14 @@ class ExcelImportExport:
                 .replace({'FR': 'FRANCE', 'IT': 'ITALY', 'ITALIE': 'ITALY', 'MC': 'MONACO'})
                 .fill_null('MONACO')
             )
-        
+
         df = df.with_columns([
             pl.lit('À traiter').alias('statut_validation'),
             pl.lit(False).alias('edge_case_flag'),
             pl.lit('').alias('edge_case_reason'),
             pl.lit(datetime.now()).alias('date_import')
         ])
-        
+
         return df
 
     @classmethod

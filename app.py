@@ -663,12 +663,21 @@ def import_page():
         if uploaded_file:
             try:
                 if uploaded_file.name.endswith('.csv'):
-                    df_import = pl.read_csv(uploaded_file)
+                    # Specify dtypes to preserve leading zeros in matricule
+                    dtypes = {"Matricule": pl.Utf8}
+                    df_import = pl.read_csv(uploaded_file, dtypes=dtypes)
                     # Apply column mapping
                     df_import = df_import.rename(system.excel_manager.EXCEL_COLUMN_MAPPING)
                 else:
-                    # Excel handling - convert pandas result to polars
-                    df_import = pl.read_excel(uploaded_file)
+                    # Excel handling - specify schema to preserve leading zeros
+                    schema_overrides = {"Matricule": pl.Utf8}
+                    df_import = pl.read_excel(uploaded_file, schema_overrides=schema_overrides)
+
+                # Ensure matricule is string after any processing
+                if 'matricule' in df_import.columns:
+                    df_import = df_import.with_columns(
+                        pl.col('matricule').cast(pl.Utf8, strict=False)
+                    )
                 
                 st.success(f"✅ {len(df_import)} employés importés avec succès")
                 
