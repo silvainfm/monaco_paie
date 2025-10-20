@@ -649,7 +649,7 @@ def import_page():
     
     system = st.session_state.payroll_system
     
-    tab1, tab2 = st.tabs(["Import Excel", "Télécharger Template"])
+    tab1, tab2 = st.tabs(["Importer un Excel", "Télécharger le Modèle"])
     
     with tab1:
         st.subheader("Importer les données depuis Excel")
@@ -657,7 +657,7 @@ def import_page():
         uploaded_file = st.file_uploader(
             "Choisir un fichier Excel",
             type=['xlsx', 'xls', 'csv'],
-            help="Le fichier doit respecter le format du template"
+            help="Le fichier doit respecter le format du modèle",
         )
         
         if uploaded_file:
