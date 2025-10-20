@@ -818,71 +818,61 @@ class PaystubPDFGenerator:
         # Add remaining charges following same pattern
     
     def _create_net_summary(self, employee_data: Dict) -> Table:
-        """Create net pay summary with employer cost and net pay side by side"""
-        
+        """Create net pay summary - right-aligned NET À PAYER box only"""
+
         net_pay = employee_data.get('salaire_net', 0)
-        cout_total = employee_data.get('cout_total_employeur', 0)
-        
+
         data = []
-        
+
         # Add withholding tax rows for French residents
         if employee_data.get('pays_residence') == 'FRANCE' and employee_data.get('prelevement_source', 0) > 0:
             data.append([
-                "", "", "",  # Empty cells for employer cost side
+                "", "",  # Spacer columns to push content right
                 "Net avant impôt", PDFStyles.format_currency(net_pay + employee_data.get('prelevement_source', 0))
             ])
             data.append([
-                "", "", "",
+                "", "",
                 "Prélèvement source", f"- {PDFStyles.format_currency(employee_data.get('prelevement_source', 0))}"
             ])
-        
-        # Main row with employer cost and net pay
+
+        # Main row with net pay only (right-aligned)
         data.append([
-            "COÛT GLOBAL SALARIÉ", PDFStyles.format_currency(cout_total),
-            "",  # Spacer column
+            "", "",  # Spacer columns to push content right
             "NET À PAYER", PDFStyles.format_currency(net_pay)
         ])
-        
-        table = Table(data, colWidths=[4.5*cm, 3.5*cm, 3.4*cm, 4*cm, 4*cm])
-        
+
+        # Column widths: spacer columns + 6cm total for NET À PAYER (3cm label + 3cm amount)
+        table = Table(data, colWidths=[7*cm, 6.4*cm, 3*cm, 3*cm])
+
         # Build style commands
         style_commands = [
             # General alignment and font
             ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
             ('FONTSIZE', (0, 0), (-1, -1), 9),
-            
+
             # Style for the main row (last row)
-            ('FONTNAME', (0, -1), (1, -1), 'Helvetica-Bold'),
-            ('FONTNAME', (3, -1), (4, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, -1), (1, -1), 10),
-            ('FONTSIZE', (3, -1), (4, -1), 10),
-            
-            # Employer cost styling (blue)
-            ('TEXTCOLOR', (1, -1), (1, -1), self.COLORS['primary_blue']),
-            ('BACKGROUND', (0, -1), (1, -1), self.COLORS['light_blue']),
-            ('BOX', (0, -1), (1, -1), 1, self.COLORS['primary_blue']),
-            
+            ('FONTNAME', (2, -1), (3, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (2, -1), (3, -1), 10),
+
             # Net pay styling (green)
-            ('TEXTCOLOR', (4, -1), (4, -1), self.COLORS['success_green']),
-            ('BACKGROUND', (3, -1), (4, -1), self.COLORS['very_light_blue']),
-            ('BOX', (3, -1), (4, -1), 1, self.COLORS['success_green']),
-            
+            ('TEXTCOLOR', (3, -1), (3, -1), self.COLORS['success_green']),
+            ('BACKGROUND', (2, -1), (3, -1), self.COLORS['very_light_blue']),
+            ('BOX', (2, -1), (3, -1), 1, self.COLORS['success_green']),
+
             # Padding for main row
-            ('TOPPADDING', (0, -1), (1, -1), 5),
-            ('BOTTOMPADDING', (0, -1), (1, -1), 5),
-            ('TOPPADDING', (3, -1), (4, -1), 5),
-            ('BOTTOMPADDING', (3, -1), (4, -1), 5),
+            ('TOPPADDING', (2, -1), (3, -1), 5),
+            ('BOTTOMPADDING', (2, -1), (3, -1), 5),
         ]
-        
+
         # Add styles for withholding tax rows if present
         if employee_data.get('pays_residence') == 'FRANCE' and employee_data.get('prelevement_source', 0) > 0:
             style_commands.extend([
-                ('FONTSIZE', (3, 0), (4, -2), 8),
-                ('TEXTCOLOR', (3, 0), (4, -2), self.COLORS['text_gray']),
+                ('FONTSIZE', (2, 0), (3, -2), 8),
+                ('TEXTCOLOR', (2, 0), (3, -2), self.COLORS['text_gray']),
             ])
-        
+
         table.setStyle(TableStyle(style_commands))
-        
+
         return table
     
     def _create_cumuls_pto_section(self, employee_data: Dict) -> Table:
@@ -908,6 +898,14 @@ class PaystubPDFGenerator:
                 PDFStyles.format_currency(get_numeric(employee_data, 'cumul_net_percu')),
                 PDFStyles.format_currency(get_numeric(employee_data, 'cumul_charges_sal')),
                 PDFStyles.format_currency(get_numeric(employee_data, 'cumul_charges_pat'))
+            ],
+            [
+                "COÛT GLOBAL SALARIÉ",
+                PDFStyles.format_currency(get_numeric(employee_data, 'cout_total_employeur')),
+                "",
+                "",
+                "",
+                ""
             ]
         ]
         
