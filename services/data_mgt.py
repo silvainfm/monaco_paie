@@ -141,8 +141,10 @@ class DataManager:
     @staticmethod
     def save_period_data(df: pl.DataFrame, company_id: str, month: int, year: int):
         """Save period data (upsert operation)"""
+        import json
+
         conn = DataManager.get_connection()
-        
+
         # Add metadata if not present
         if 'company_id' not in df.columns:
             df = df.with_columns([
@@ -151,32 +153,64 @@ class DataManager:
                 pl.lit(month).alias('period_month'),
                 pl.lit(datetime.now()).alias('last_modified')
             ])
-        
+
+        # Convert struct columns to JSON strings to avoid Parquet serialization issues
+        struct_columns = ['details_charges', 'tickets_restaurant_details']
+
+        for col in struct_columns:
+            if col in df.columns:
+                # Check if column is struct type
+                if df[col].dtype == pl.Struct or isinstance(df[col].dtype, pl.Struct):
+                    # Convert struct to JSON string
+                    df = df.with_columns(
+                        pl.col(col).map_elements(
+                            lambda x: json.dumps(x) if x is not None else None,
+                            return_dtype=pl.Utf8
+                        ).alias(col)
+                    )
+
         # Delete existing period data
         conn.execute("""
-            DELETE FROM payroll_data 
+            DELETE FROM payroll_data
             WHERE company_id = ? AND period_year = ? AND period_month = ?
         """, [company_id, year, month])
-        
+
         # Insert new data
         conn.execute("INSERT INTO payroll_data SELECT * FROM df")
-        
+
         logger.info(f"Saved {df.height} records for {company_id} {year}-{month:02d}")
     
     @staticmethod
     def load_period_data(company_id: str, month: int, year: int) -> pl.DataFrame:
         """Load period data (optimized single-period lookup)"""
+        import json
+
         conn = DataManager.get_connection()
-        
+
         result = conn.execute("""
             SELECT * FROM payroll_data
             WHERE company_id = ? AND period_year = ? AND period_month = ?
             ORDER BY matricule
         """, [company_id, year, month]).pl()
-        
+
         if result.height == 0:
             return DataManager.create_empty_df()
-        
+
+        # Convert JSON string columns back to structs/dicts if needed
+        struct_columns = ['details_charges', 'tickets_restaurant_details']
+
+        for col in struct_columns:
+            if col in result.columns:
+                # Check if column is string (JSON) type
+                if result[col].dtype == pl.Utf8:
+                    # Parse JSON strings back to Python dicts
+                    result = result.with_columns(
+                        pl.col(col).map_elements(
+                            lambda x: json.loads(x) if x is not None and x != '' else None,
+                            return_dtype=pl.Object
+                        ).alias(col)
+                    )
+
         return result
     
     @staticmethod
