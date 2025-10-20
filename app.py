@@ -386,12 +386,12 @@ class IntegratedPayrollSystem:
             for row in df.iter_rows(named=True):
                 payslip = self.calculator.process_employee_payslip(row)
                 is_valid, issues = self.validator.validate_payslip(payslip)
-                
+
                 if not is_valid or row.get('remarques') or row.get('date_sortie'):
                     edge_cases.append({
-                        'matricule': row['matricule'],
-                        'nom': row['nom'],
-                        'prenom': row['prenom'],
+                        'matricule': row.get('matricule', ''),
+                        'nom': row.get('nom', ''),
+                        'prenom': row.get('prenom', ''),
                         'issues': issues,
                         'remarques': row.get('remarques'),
                         'date_sortie': row.get('date_sortie')
@@ -403,12 +403,12 @@ class IntegratedPayrollSystem:
                     payslip['statut_validation'] = True
                     payslip['edge_case_flag'] = False
                     payslip['edge_case_reason'] = ''
-                
+
                 # Keep original data
                 for key in row.keys():
                     if key not in payslip:
                         payslip[key] = row[key]
-                
+
                 processed_data.append(payslip)
             
             processed_df = pl.DataFrame(processed_data)
@@ -873,13 +873,13 @@ def validation_page():
         return
     
     for row in filtered_df.iter_rows(named=True):
-        matricule = row['matricule']
+        matricule = row.get('matricule', '')
         is_edge_case = row.get('edge_case_flag', False)
         is_validated = row.get('statut_validation', False) == True
-        
+
         # Expander title with status indicator
         status_icon = "⚠️" if is_edge_case else ("✅" if is_validated else "⏳")
-        title = f"{status_icon} {row['nom']} {row['prenom']} - {matricule}"
+        title = f"{status_icon} {row.get('nom', '')} {row.get('prenom', '')} - {matricule}"
         
         with st.expander(title, expanded=is_edge_case):
             # Initialize edit mode state
@@ -1519,7 +1519,7 @@ def validation_page():
                                 df, st.session_state.current_company, month, year
                             )
                             
-                            st.success(f"✅ Fiche validée pour {row['nom']} {row['prenom']}")
+                            st.success(f"✅ Fiche validée pour {row.get('nom', '')} {row.get('prenom', '')}")
                             st.rerun()
                     else:
                         st.success("✅ Déjà validé")
@@ -2466,12 +2466,12 @@ def _show_read_only_validation():
         return
     
     for row in filtered_df.iter_rows(named=True):
-        matricule = row['matricule']
+        matricule = row.get('matricule', '')
         is_edge_case = row.get('edge_case_flag', False)
         is_validated = row.get('statut_validation', False) == True
-        
+
         status_icon = "⚠️" if is_edge_case else ("✅" if is_validated else "⏳")
-        title = f"{status_icon} {row['nom']} {row['prenom']} - {matricule} [LECTURE SEULE]"
+        title = f"{status_icon} {row.get('nom', '')} {row.get('prenom', '')} - {matricule} [LECTURE SEULE]"
         
         with st.expander(title):
             # Show issues if any
