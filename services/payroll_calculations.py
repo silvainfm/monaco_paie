@@ -571,9 +571,13 @@ class ValidateurPaieMonaco:
             issues.append("Nombre d'heures d'absence élevé")
         
         # Cohérence des charges
-        ratio_charges = payslip_data.get('total_charges_salariales', 0) / payslip_data.get('salaire_brut', 1)
-        if ratio_charges < 0.10 or ratio_charges > 0.50:
-            issues.append(f"Ratio charges salariales anormal: {ratio_charges:.1%}")
+        salaire_brut = payslip_data.get('salaire_brut', 0)
+        if salaire_brut > 0:
+            ratio_charges = payslip_data.get('total_charges_salariales', 0) / salaire_brut
+            if ratio_charges < 0.10 or ratio_charges > 0.50:
+                issues.append(f"Ratio charges salariales anormal: {ratio_charges:.1%}")
+        else:
+            issues.append("Salaire brut nul ou négatif")
         
         # Cas de sortie
         if payslip_data.get('date_sortie'):
