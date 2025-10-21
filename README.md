@@ -25,4 +25,4 @@ With the software there will be a need to add paystub data monthly to the databa
 * csv/excel file with the taux and plafonds (ceilings) for each year
 * automatic creation and email send of xml file to declare the salary to the Monaco government
 * automatic email send of the paystubs, paystub journal, and PTO provision to the client (the company) for validation before sending them to the employees
-* add a ligne for "regularisation" of previous paystubs that had errors or for which new data has been received.
+* add a ligne for "regularisation" of previous paystubs that had errors or for which new data has been received. In these the base and taux for all "charges" will have to be updated
