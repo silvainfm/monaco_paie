@@ -2607,9 +2607,9 @@ def config_page():
         return
     
     system = st.session_state.payroll_system
-    
-    tab1, tab2, tab3, tab4 = st.tabs(["Entreprise", "Utilisateurs", "Paramètres", "Admin"])
-    
+
+    tab1, tab2, tab3 = st.tabs(["Entreprise", "Utilisateurs", "Admin"])
+
     with tab1:
         st.subheader("Informations de l'entreprise")
         
@@ -2657,28 +2657,9 @@ def config_page():
         with col3:
             st.metric("Comptables", stats.get('comptable_users', 0))
 
-    
     with tab3:
-        st.subheader("Paramètres système")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.write("**Paramètres de calcul Monaco**")
-            plafond_ss = st.number_input("Plafond Sécurité Sociale T1", value=3428.00)
-            smic_horaire = st.number_input("SMIC horaire", value=11.65)
-            base_heures = st.number_input("Base heures légale", value=169.00)
-        
-        with col2:
-            st.write("**Taux de cotisations**")
-            st.info("Les taux sont définis selon la législation monégasque 2024")
-            st.write("CAR Salarial: 6.85%")
-            st.write("CAR Patronal: 8.35%")
-            st.write("CCSS: 14.75%")
-            st.write("CMRC: 5.22%")
-
-    with tab4:
         # Include the full admin panel in the configuration
+        st.info("ℹ️ Les paramètres de calcul (plafonds SS, SMIC, taux de cotisations) sont désormais gérés dans le fichier CSV: config/payroll_rates.csv")
         admin_panel()
 
 def email_config_page():
