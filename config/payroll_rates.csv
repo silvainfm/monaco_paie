@@ -8,3 +8,22 @@ CONSTANT,"",TAUX_HS_150,Taux heures sup 150%,"",1.5,1.5
 CONSTANT,"",TICKET_RESTO_VALEUR,Valeur unitaire ticket restaurant,"",9.0,9.0
 CONSTANT,"",TICKET_RESTO_PART_PATRONALE,Part patronale ticket restaurant,"",0.6,0.6
 CONSTANT,"",TICKET_RESTO_PART_SALARIALE,Part salariale ticket restaurant,"",0.4,0.4
+CHARGE,SALARIAL,CAR,Caisse Autonome des Retraites,None,6.85,6.85
+CHARGE,SALARIAL,CCSS,Caisse de Compensation des Services Sociaux,None,14.75,14.75
+CHARGE,SALARIAL,ASSEDIC_T1,Assurance chômage Tranche 1,T1,2.40,2.40
+CHARGE,SALARIAL,ASSEDIC_T2,Assurance chômage Tranche 2,T2,2.40,2.40
+CHARGE,SALARIAL,RETRAITE_COMP_T1,Retraite complémentaire Tranche 1,T1,3.15,3.15
+CHARGE,SALARIAL,RETRAITE_COMP_T2,Retraite complémentaire Tranche 2,T2,8.64,8.64
+CHARGE,SALARIAL,CONTRIB_EQUILIBRE_TECH,Contribution équilibre technique,None,0.14,0.14
+CHARGE,SALARIAL,CONTRIB_EQUILIBRE_GEN_T1,Contribution équilibre général T1,T1,0.86,0.86
+CHARGE,SALARIAL,CONTRIB_EQUILIBRE_GEN_T2,Contribution équilibre général T2,T2,1.08,1.08
+CHARGE,PATRONAL,CAR,Caisse Autonome des Retraites,None,8.35,8.35
+CHARGE,PATRONAL,CMRC,Caisse Monégasque de Retraite Complémentaire,None,5.22,5.22
+CHARGE,PATRONAL,ASSEDIC_T1,Assurance chômage Tranche 1,T1,4.05,4.05
+CHARGE,PATRONAL,ASSEDIC_T2,Assurance chômage Tranche 2,T2,4.05,4.05
+CHARGE,PATRONAL,RETRAITE_COMP_T1,Retraite complémentaire Tranche 1,T1,4.72,4.72
+CHARGE,PATRONAL,RETRAITE_COMP_T2,Retraite complémentaire Tranche 2,T2,12.95,12.95
+CHARGE,PATRONAL,CONTRIB_EQUILIBRE_TECH,Contribution équilibre technique,None,0.21,0.21
+CHARGE,PATRONAL,CONTRIB_EQUILIBRE_GEN_T1,Contribution équilibre général T1,T1,1.29,1.29
+CHARGE,PATRONAL,CONTRIB_EQUILIBRE_GEN_T2,Contribution équilibre général T2,T2,1.62,1.62
+CHARGE,PATRONAL,PREVOYANCE,Prévoyance collective,None,1.50,1.50
