@@ -345,6 +345,70 @@ def safe_get_numeric(row: Dict, field: str, default: float = 0.0) -> float:
 
 
 # ============================================================================
+# AUDIT LOG PAGE
+# ============================================================================
+
+def audit_log_page():
+    """View audit trail of modifications"""
+    st.header("📋 Journal des Modifications")
+
+    if st.session_state.role != 'admin':
+        st.error("Accès réservé aux administrateurs")
+        return
+
+    log_dir = Path("data/audit_logs")
+    if not log_dir.exists():
+        st.info("Aucune modification enregistrée")
+        return
+
+    # Load all logs
+    all_logs = []
+    for log_file in log_dir.glob("*.jsonl"):
+        with open(log_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                try:
+                    all_logs.append(json.loads(line))
+                except:
+                    pass
+
+    if not all_logs:
+        st.info("Aucune modification enregistrée")
+        return
+
+    # Convert to Polars DataFrame
+    logs_df = pl.DataFrame(all_logs)
+    logs_df = logs_df.with_columns(
+        pl.col('timestamp').str.strptime(pl.Datetime, format='%Y-%m-%dT%H:%M:%S.%f')
+    ).sort('timestamp', descending=True)
+
+    # Filters
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        user_filter = st.selectbox("Utilisateur", ["Tous"] + logs_df['user'].unique().to_list())
+    with col2:
+        period_filter = st.selectbox("Période", ["Toutes"] + logs_df['period'].unique().to_list())
+    with col3:
+        matricule_filter = st.text_input("Matricule")
+
+    # Apply filters
+    filtered = logs_df
+    if user_filter != "Tous":
+        filtered = filtered.filter(pl.col('user') == user_filter)
+    if period_filter != "Toutes":
+        filtered = filtered.filter(pl.col('period') == period_filter)
+    if matricule_filter:
+        filtered = filtered.filter(pl.col('matricule').str.contains(f"(?i){matricule_filter}"))
+
+    st.metric("Total modifications", len(filtered))
+
+    # Display
+    st.dataframe(
+        filtered.select(['timestamp', 'user', 'matricule', 'field', 'old_value', 'new_value', 'reason']).to_pandas(),
+        use_container_width=True
+    )
+
+
+# ============================================================================
 # UI HELPER FUNCTIONS
 # ============================================================================
 
