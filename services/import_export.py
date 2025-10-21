@@ -192,7 +192,18 @@ class ExcelImportExport:
         "Salaire de base": "salaire_base",
         "Pays résidence": "pays_residence",
         "Taux prélèvement source": "taux_prelevement_source",
-        "Email": "email"
+        "Email": "email",
+        "Date de naissance": "date_naissance",
+        "Affiliation AC": "affiliation_ac",
+        "Affiliation RC": "affiliation_rc",
+        "Affiliation CAR": "affiliation_car",
+        "Télétravail": "teletravail",
+        "Pays télétravail": "pays_teletravail",
+        "Administrateur salarié": "administrateur_salarie",
+        "CP Date début": "cp_date_debut",
+        "CP Date fin": "cp_date_fin",
+        "Maladie Date début": "maladie_date_debut",
+        "Maladie Date fin": "maladie_date_fin"
     }
     
     # Colonnes requises pour l'import

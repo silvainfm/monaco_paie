@@ -22,7 +22,6 @@ from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus.doctemplate import BaseDocTemplate
-import pandas as pd
 import polars as pl
 from datetime import datetime, date
 from pathlib import Path

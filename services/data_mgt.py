@@ -99,6 +99,17 @@ class DataManager:
                 cp_restants_n DOUBLE,
                 details_charges JSON,
                 tickets_restaurant_details JSON,
+                date_naissance DATE,
+                affiliation_ac VARCHAR,
+                affiliation_rc VARCHAR,
+                affiliation_car VARCHAR,
+                teletravail VARCHAR,
+                pays_teletravail VARCHAR,
+                administrateur_salarie VARCHAR,
+                cp_date_debut DATE,
+                cp_date_fin DATE,
+                maladie_date_debut DATE,
+                maladie_date_fin DATE,
                 last_modified TIMESTAMP,
                 PRIMARY KEY (company_id, period_year, period_month, matricule)
             )

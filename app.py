@@ -44,10 +44,10 @@ HAS_EXCEL = True
 from services.data_mgt import (
     DataManager,
     DataConsolidation
-) 
+)
 from services.auth import AuthManager
 from services.payroll_calculations import (
-    CalculateurPaieMonaco, 
+    CalculateurPaieMonaco,
     ValidateurPaieMonaco,
     GestionnaireCongesPayes,
     ChargesSocialesMonaco,
@@ -68,9 +68,23 @@ from services.email_archive import (
     EmailTemplate
 )
 from services.oauth2_integration import (
-    OAuth2Config, 
-    OAuth2EmailManager, 
+    OAuth2Config,
+    OAuth2EmailManager,
     MicrosoftOAuth2Service
+)
+from services.payroll_system import IntegratedPayrollSystem
+from services.payslip_helpers import (
+    get_salary_rubrics,
+    get_all_available_salary_rubrics,
+    get_available_rubrics_for_employee,
+    get_charge_rubrics,
+    get_available_charges_for_employee,
+    log_modification,
+    recalculate_employee_payslip,
+    clean_employee_data_for_pdf,
+    safe_get_charge_value,
+    safe_get_numeric,
+    _show_read_only_validation
 )
 
 # Configure logging
@@ -320,124 +334,6 @@ def is_comptable() -> bool:
     return st.session_state.get("role") == "comptable"
 
 # ============================================================================
-# MAIN APPLICATION SYSTEM
-# ============================================================================
-
-class IntegratedPayrollSystem:
-    """Système intégré de gestion de paie"""
-    
-    def __init__(self):
-        """Initialiser le système complet"""
-        self.calculator = CalculateurPaieMonaco()
-        self.validator = ValidateurPaieMonaco()
-        self.pto_manager = GestionnaireCongesPayes()
-        self.excel_manager = ExcelImportExport()
-        self.data_consolidator = DataConsolidation()
-        self.company_info = self._load_company_info()
-    
-    def _load_company_info(self) -> Dict:
-        """Charger les informations de l'entreprise"""
-        config_file = CONFIG_DIR / "company_info.json"
-        
-        if config_file.exists():
-            with open(config_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        
-        default_info = {
-            'name': 'Cabinet Comptable Monaco',
-            'siret': '000000000',
-            'address': '98000 MONACO',
-            'phone': '+377 93 00 00 00',
-            'email': 'contact@cabinet.mc'
-        }
-        
-        with open(config_file, 'w', encoding='utf-8') as f:
-            json.dump(default_info, f, indent=2)
-        
-        return default_info
-    
-    def process_monthly_payroll(self, company_id: str, period: str) -> Dict:
-        """Traiter la paie mensuelle complète"""
-        report = {
-            'period': period,
-            'company_id': company_id,
-            'start_time': datetime.now(),
-            'steps': []
-        }
-        
-        try:
-            month, year = map(int, period.split('-'))
-            df = self.data_consolidator.load_period_data(company_id, month, year)
-
-            if df.is_empty():
-                report['error'] = "Aucune donnée trouvée pour cette période"
-                return report
-            
-            report['steps'].append({
-                'step': 'Chargement des données',
-                'status': 'success',
-                'count': len(df)
-            })
-            
-            processed_data = []
-            edge_cases = []
-            
-            # Convert to list of dicts for processing
-            for row in df.iter_rows(named=True):
-                payslip = self.calculator.process_employee_payslip(row)
-                is_valid, issues = self.validator.validate_payslip(payslip)
-
-                if not is_valid or row.get('remarques') or row.get('date_sortie'):
-                    edge_cases.append({
-                        'matricule': row.get('matricule', ''),
-                        'nom': row.get('nom', ''),
-                        'prenom': row.get('prenom', ''),
-                        'issues': issues,
-                        'remarques': row.get('remarques'),
-                        'date_sortie': row.get('date_sortie')
-                    })
-                    payslip['statut_validation'] = 'À vérifier'
-                    payslip['edge_case_flag'] = True
-                    payslip['edge_case_reason'] = '; '.join(issues) if issues else 'Remarques ou date de sortie'
-                else:
-                    payslip['statut_validation'] = True
-                    payslip['edge_case_flag'] = False
-                    payslip['edge_case_reason'] = ''
-
-                # Keep original data
-                for key in row.keys():
-                    if key not in payslip:
-                        payslip[key] = row[key]
-
-                processed_data.append(payslip)
-            
-            processed_df = pl.DataFrame(processed_data)
-            self.data_consolidator.save_period_data(processed_df, company_id, month, year)
-            
-            report['steps'].append({
-                'step': 'Calcul des paies',
-                'status': 'success',
-                'processed': len(processed_data),
-                'validated': len(processed_data) - len(edge_cases),
-                'edge_cases': len(edge_cases)
-            })
-            
-            st.session_state['processed_data'] = processed_df
-            st.session_state['edge_cases'] = edge_cases
-            
-            report['success'] = True
-            report['end_time'] = datetime.now()
-            report['duration'] = (report['end_time'] - report['start_time']).total_seconds()
-            
-        except Exception as e:
-            report['error'] = str(e)
-            report['success'] = False
-            logger.error(f"Erreur traitement paie: {e}")
-            logger.error(traceback.format_exc())
-        
-        return report
-
-# ============================================================================
 # STREAMLIT UI PAGES
 # ============================================================================
 
@@ -505,14 +401,17 @@ def main_app():
         
         pages = {
             "📊 Tableau de bord": "dashboard",
-            "📥 Import des données": "import", 
+            "📥 Import des données": "import",
             "💰 Traitement des paies": "processing",
             "✅ Validation": "validation",
             "📄 Génération PDF": "pdf_generation",
+            "📄 Déclaration DSM Monaco": "dsm_declaration",
+            "📧 Envoi Validation Client": "send_validation_email",
             "📄 Export des résultats": "export"
         }
-        
+
         if st.session_state.role == "admin":
+            pages["⚙️ Configuration Email"] = "email_config"
             pages["⚙️ Configuration"] = "config"
             pages["📋 Journal modifications"] = "audit_log"
         
@@ -546,8 +445,14 @@ def main_app():
         validation_page()
     elif current_page == "pdf_generation":
         pdf_generation_page()
+    elif current_page == "dsm_declaration":
+        dsm_declaration_page()
+    elif current_page == "send_validation_email":
+        send_validation_email_page()
     elif current_page == "export":
         export_page()
+    elif current_page == "email_config":
+        email_config_page()
     elif current_page == "config":
         config_page()
     elif current_page == "audit_log":
@@ -1435,7 +1340,7 @@ def validation_page():
                             try:
                                 # Recalculate with modifications
                                 updated = recalculate_employee_payslip(
-                                    row.to_dict(), 
+                                    dict(row),
                                     st.session_state[mod_key]
                                 )
                                 
@@ -1676,8 +1581,8 @@ def pdf_generation_page():
                         cleaned_data = []
                         for row in df_copy.iter_rows(named=True):
                             cleaned_data.append(clean_employee_data_for_pdf(row))
-                        df_pandas = pl.DataFrame(cleaned_data).to_pandas()
-                        documents = pdf_service.generate_monthly_documents(df_pandas, f"{month:02d}-{year}")
+                        df_cleaned = pl.DataFrame(cleaned_data)
+                        documents = pdf_service.generate_monthly_documents(df_cleaned, f"{month:02d}-{year}")
                         
                         if 'paystubs' in documents:
                             # Create a zip file with all paystubs
@@ -1735,9 +1640,9 @@ def pdf_generation_page():
             if st.button("📊 Générer journal de paie", type="primary", use_container_width=True):
                 try:
                     with st.spinner("Génération du journal en cours..."):
-                        employees_data = df.to_dict('records')
+                        employees_data = df.to_dicts()
                         journal_buffer = pdf_service.journal_generator.generate_pay_journal(
-                            employees_data, 
+                            employees_data,
                             f"{month:02d}-{year}"
                         )
                     
@@ -2066,474 +1971,6 @@ def export_page():
                     st.metric("Charges patronales totales", f"{total_pat:,.2f} €")
 
 # ============================================================================
-# PAYSLIP EDITING HELPERS
-# ============================================================================
-
-def get_salary_rubrics() -> List[Dict]:
-    """Get salary element rubrics from pdf_generation"""
-    from services.pdf_generation import PaystubPDFGenerator
-    codes = PaystubPDFGenerator.RUBRIC_CODES
-
-    return [
-        {'code': codes['salaire_base'], 'label': 'Salaire Mensuel', 'field': 'salaire_base'},
-        {'code': codes['prime_anciennete'], 'label': "Prime d'ancienneté", 'field': 'prime_anciennete'},
-        {'code': codes['heures_sup_125'], 'label': 'Heures sup. 125%', 'field': 'heures_sup_125'},
-        {'code': codes['heures_sup_150'], 'label': 'Heures sup. 150%', 'field': 'heures_sup_150'},
-        {'code': codes['prime_performance'], 'label': 'Prime performance', 'field': 'prime'},
-        {'code': codes['prime_autre'], 'label': 'Autre prime', 'field': 'prime_autre'},
-        {'code': codes['jours_feries'], 'label': 'Jours fériés 100%', 'field': 'heures_jours_feries'},
-        {'code': codes['absence_maladie'], 'label': 'Absence maladie', 'field': 'heures_absence'},
-        {'code': codes['absence_cp'], 'label': 'Absence congés payés', 'field': 'heures_conges_payes'},
-        {'code': codes['indemnite_cp'], 'label': 'Indemnité congés payés', 'field': 'jours_conges_pris'},
-        {'code': codes['tickets_resto'], 'label': 'Tickets restaurant', 'field': 'tickets_restaurant'},
-    ]
-
-def get_all_available_salary_rubrics(year: int = None) -> List[Dict]:
-    """Get all available salary rubrics including constants from MonacoPayrollConstants"""
-    from services.payroll_calculations import MonacoPayrollConstants
-    from services.pdf_generation import PaystubPDFGenerator
-    from pathlib import Path
-
-    all_rubrics = []
-
-    # Add standard salary rubrics
-    codes = PaystubPDFGenerator.RUBRIC_CODES
-    all_rubrics.extend([
-        {'code': codes['salaire_base'], 'label': 'Salaire Mensuel', 'field': 'salaire_base'},
-        {'code': codes['prime_anciennete'], 'label': "Prime d'ancienneté", 'field': 'prime_anciennete'},
-        {'code': codes['heures_sup_125'], 'label': 'Heures sup. 125%', 'field': 'heures_sup_125'},
-        {'code': codes['heures_sup_150'], 'label': 'Heures sup. 150%', 'field': 'heures_sup_150'},
-        {'code': codes['prime_performance'], 'label': 'Prime performance', 'field': 'prime'},
-        {'code': codes['prime_autre'], 'label': 'Autre prime', 'field': 'prime_autre'},
-        {'code': codes['jours_feries'], 'label': 'Jours fériés 100%', 'field': 'heures_jours_feries'},
-        {'code': codes['absence_maladie'], 'label': 'Absence maladie', 'field': 'heures_absence'},
-        {'code': codes['absence_cp'], 'label': 'Absence congés payés', 'field': 'heures_conges_payes'},
-        {'code': codes['indemnite_cp'], 'label': 'Indemnité congés payés', 'field': 'jours_conges_pris'},
-        {'code': codes['tickets_resto'], 'label': 'Tickets restaurant', 'field': 'tickets_restaurant'},
-        {'code': codes['maintien_salaire'], 'label': 'Maintien de salaire', 'field': 'maintien_salaire'},
-    ])
-
-    # Add constants from MonacoPayrollConstants CSV
-    csv_path = Path("config") / "payroll_rates.csv"
-    if csv_path.exists():
-        try:
-            df = pl.read_csv(csv_path)
-            constants_df = df.filter(pl.col("category") == "CONSTANT")
-            for row in constants_df.iter_rows(named=True):
-                const_code = row["code"]
-                const_desc = row.get("description", const_code)
-                # Use the constant code as the field name (lowercase)
-                all_rubrics.append({
-                    'code': const_code,
-                    'label': const_desc,
-                    'field': const_code.lower()
-                })
-        except Exception as e:
-            print(f"Error loading constants: {e}")
-
-    return all_rubrics
-
-def get_available_rubrics_for_employee(employee_data: Dict, year: int = None) -> List[Dict]:
-    """Get rubrics not currently displayed for this employee"""
-    all_rubrics = get_all_available_salary_rubrics(year)
-
-    # Get currently displayed fields (non-zero values)
-    displayed_fields = set()
-    for rubric in all_rubrics:
-        field = rubric['field']
-        if safe_get_numeric(employee_data, field, 0) != 0:
-            displayed_fields.add(field)
-
-    # Filter out displayed rubrics
-    available = [r for r in all_rubrics if r['field'] not in displayed_fields]
-
-    return available
-
-def get_charge_rubrics() -> Dict[str, List[Dict]]:
-    """Get social charge rubrics from payroll_calculations"""
-    from services.payroll_calculations import ChargesSocialesMonaco
-
-    salariales = []
-    for key, params in ChargesSocialesMonaco.COTISATIONS_SALARIALES.items():
-        salariales.append({
-            'code': key,
-            'label': params['description'],
-            'taux': params['taux'],
-            'plafond': params['plafond']
-        })
-
-    patronales = []
-    for key, params in ChargesSocialesMonaco.COTISATIONS_PATRONALES.items():
-        patronales.append({
-            'code': key,
-            'label': params['description'],
-            'taux': params['taux'],
-            'plafond': params['plafond']
-        })
-
-    return {
-        'salariales': salariales,
-        'patronales': patronales
-    }
-
-def get_available_charges_for_employee(employee_data: Dict, year: int = None) -> List[Dict]:
-    """Get charge codes not currently displayed for this employee"""
-    from services.payroll_calculations import ChargesSocialesMonaco
-
-    # Initialize charges calculator
-    charges_calc = ChargesSocialesMonaco(year)
-
-    # Get all available charge codes
-    all_charges = {}
-    for code, params in charges_calc.COTISATIONS_SALARIALES.items():
-        all_charges[code] = {
-            'code': code,
-            'label': params['description'],
-            'taux_sal': params['taux'],
-            'taux_pat': 0,
-            'plafond': params['plafond'],
-            'has_salarial': True,
-            'has_patronal': False
-        }
-
-    # Merge with patronal charges
-    for code, params in charges_calc.COTISATIONS_PATRONALES.items():
-        if code in all_charges:
-            all_charges[code]['taux_pat'] = params['taux']
-            all_charges[code]['has_patronal'] = True
-        else:
-            all_charges[code] = {
-                'code': code,
-                'label': params['description'],
-                'taux_sal': 0,
-                'taux_pat': params['taux'],
-                'plafond': params['plafond'],
-                'has_salarial': False,
-                'has_patronal': True
-            }
-
-    # Get currently displayed charges
-    details_charges = employee_data.get('details_charges', {})
-    charges_sal = details_charges.get('charges_salariales', {})
-    charges_pat = details_charges.get('charges_patronales', {})
-
-    displayed_codes = set()
-    for code in charges_sal.keys():
-        if charges_sal.get(code, 0) != 0:
-            displayed_codes.add(code)
-    for code in charges_pat.keys():
-        if charges_pat.get(code, 0) != 0:
-            displayed_codes.add(code)
-
-    # Filter out displayed charges
-    available = [charge for code, charge in all_charges.items() if code not in displayed_codes]
-
-    return available
-
-def log_modification(matricule: str, field: str, old_value, new_value, user: str, reason: str):
-    """Log paystub modification for audit trail"""
-    
-    log_dir = Path("data/audit_logs")
-    log_dir.mkdir(parents=True, exist_ok=True)
-    
-    log_entry = {
-        'timestamp': datetime.now().isoformat(),
-        'user': user,
-        'matricule': matricule,
-        'field': field,
-        'old_value': str(old_value),
-        'new_value': str(new_value),
-        'reason': reason,
-        'period': st.session_state.current_period,
-        'company': st.session_state.current_company
-    }
-    
-    log_file = log_dir / f"modifications_{datetime.now().strftime('%Y%m')}.jsonl"
-    with open(log_file, 'a', encoding='utf-8') as f:
-        f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
-
-def recalculate_employee_payslip(employee_data: Dict, modifications: Dict) -> Dict:
-    """Recalculate payslip after modifications"""
-    from services.payroll_calculations import CalculateurPaieMonaco
-    
-    # Deep copy and clean all numeric fields first
-    updated_data = {}
-    
-    # Copy and clean all fields from employee_data
-    for key, value in employee_data.items():
-        if key in ['salaire_brut', 'salaire_base', 'salaire_net', 'total_charges_salariales', 
-                   'total_charges_patronales', 'heures_sup_125', 'heures_sup_150', 'prime',
-                   'montant_hs_125', 'montant_hs_150', 'cout_total_employeur', 'taux_horaire',
-                   'base_heures', 'heures_payees', 'retenue_absence', 'heures_absence',
-                   'indemnite_cp', 'heures_jours_feries', 'montant_jours_feries',
-                   'prime_anciennete', 'prime_autre', 'tickets_restaurant']:
-            # Force numeric conversion
-            if isinstance(value, dict):
-                updated_data[key] = 0.0
-            elif pl.is_nan(value) or value is None:
-                updated_data[key] = 0.0
-            else:
-                try:
-                    updated_data[key] = float(value)
-                except (TypeError, ValueError):
-                    updated_data[key] = 0.0
-        else:
-            updated_data[key] = value
-    
-    # Handle nested charges updates
-    if 'charges_salariales' in modifications or 'charges_patronales' in modifications:
-        if 'details_charges' not in updated_data:
-            updated_data['details_charges'] = {'charges_salariales': {}, 'charges_patronales': {}}
-        if not isinstance(updated_data['details_charges'], dict):
-            updated_data['details_charges'] = {'charges_salariales': {}, 'charges_patronales': {}}
-            
-        if 'charges_salariales' in modifications:
-            if 'charges_salariales' not in updated_data['details_charges']:
-                updated_data['details_charges']['charges_salariales'] = {}
-            updated_data['details_charges']['charges_salariales'].update(modifications['charges_salariales'])
-            
-        if 'charges_patronales' in modifications:
-            if 'charges_patronales' not in updated_data['details_charges']:
-                updated_data['details_charges']['charges_patronales'] = {}
-            updated_data['details_charges']['charges_patronales'].update(modifications['charges_patronales'])
-        
-        # Remove from top-level modifications
-        modifications = {k: v for k, v in modifications.items() 
-                        if k not in ['charges_salariales', 'charges_patronales']}
-    
-    # Apply remaining modifications (these are already numeric from the form inputs)
-    updated_data.update(modifications)
-    
-    # Recalculate
-    calculator = CalculateurPaieMonaco()
-    return calculator.process_employee_payslip(updated_data)
-
-def audit_log_page():
-    """View audit trail of modifications"""
-    st.header("📋 Journal des Modifications")
-    
-    if st.session_state.role != 'admin':
-        st.error("Accès réservé aux administrateurs")
-        return
-    
-    log_dir = Path("data/audit_logs")
-    if not log_dir.exists():
-        st.info("Aucune modification enregistrée")
-        return
-    
-    # Load all logs
-    all_logs = []
-    for log_file in log_dir.glob("*.jsonl"):
-        with open(log_file, 'r', encoding='utf-8') as f:
-            for line in f:
-                try:
-                    all_logs.append(json.loads(line))
-                except:
-                    pass
-    
-    if not all_logs:
-        st.info("Aucune modification enregistrée")
-        return
-    
-    # Convert to Polars DataFrame
-    logs_df = pl.DataFrame(all_logs)
-    logs_df = logs_df.with_columns(
-        pl.col('timestamp').str.strptime(pl.Datetime, format='%Y-%m-%dT%H:%M:%S.%f')
-    ).sort('timestamp', descending=True)
-
-    # Filters
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        user_filter = st.selectbox("Utilisateur", ["Tous"] + logs_df['user'].unique().to_list())
-    with col2:
-        period_filter = st.selectbox("Période", ["Toutes"] + logs_df['period'].unique().to_list())
-    with col3:
-        matricule_filter = st.text_input("Matricule")
-
-    # Apply filters
-    filtered = logs_df
-    if user_filter != "Tous":
-        filtered = filtered.filter(pl.col('user') == user_filter)
-    if period_filter != "Toutes":
-        filtered = filtered.filter(pl.col('period') == period_filter)
-    if matricule_filter:
-        filtered = filtered.filter(pl.col('matricule').str.contains(f"(?i){matricule_filter}"))
-
-    st.metric("Total modifications", len(filtered))
-
-    # Display
-    st.dataframe(
-        filtered.select(['timestamp', 'user', 'matricule', 'field', 'old_value', 'new_value', 'reason']).to_pandas(),
-        use_container_width=True
-    )
-
-def clean_employee_data_for_pdf(employee_dict: Dict) -> Dict:
-    """Clean employee data to ensure numeric fields are not dicts"""
-    import numpy as np
-    
-    numeric_fields = [
-        'salaire_brut', 'salaire_base', 'salaire_net', 
-        'total_charges_salariales', 'total_charges_patronales',
-        'heures_sup_125', 'heures_sup_150', 'prime',
-        'montant_hs_125', 'montant_hs_150', 'cout_total_employeur',
-        'taux_horaire', 'base_heures', 'heures_payees',
-        'retenue_absence', 'heures_absence', 'indemnite_cp',
-        'heures_jours_feries', 'montant_jours_feries',
-        'cumul_brut', 'cumul_base_ss', 'cumul_net_percu',
-        'cumul_charges_sal', 'cumul_charges_pat',
-        'jours_cp_pris', 'tickets_restaurant'
-    ]
-    
-    cleaned = {}
-    
-    # Copy all fields
-    for key, value in employee_dict.items():
-        if key in numeric_fields:
-            # Force numeric conversion
-            if isinstance(value, dict):
-                cleaned[key] = 0
-            elif isinstance(value, (list, tuple)):
-                cleaned[key] = 0
-            elif pl.is_nan(value) or value is None:
-                cleaned[key] = 0
-            elif isinstance(value, (int, float, np.integer, np.floating)):
-                cleaned[key] = float(value)
-            else:
-                try:
-                    cleaned[key] = float(value)
-                except (TypeError, ValueError, AttributeError):
-                    cleaned[key] = 0
-        else:
-            # Keep non-numeric fields as-is
-            cleaned[key] = value
-    
-    return cleaned
-
-def safe_get_charge_value(details_charges: Dict, charge_type: str, charge_code: str) -> float:
-    """Safely extract charge value from details_charges structure"""
-    try:
-        charges = details_charges.get(charge_type, {})
-        if isinstance(charges, dict):
-            value = charges.get(charge_code, 0)
-            if isinstance(value, dict):
-                # If it's still a dict, try to extract 'montant' or 'value' key
-                return float(value.get('montant', value.get('value', 0)))
-            return float(value) if value is not None else 0.0
-        return 0.0
-    except (TypeError, ValueError, AttributeError):
-        return 0.0
-
-def safe_get_numeric(row: Dict, field: str, default: float = 0.0) -> float:
-    """Safely extract numeric value from dict, handling nested structures"""
-    try:
-        value = row.get(field, default)
-        if isinstance(value, dict):
-            return float(value.get('montant', value.get('value', value.get('amount', default))))
-        if value is None or (isinstance(value, float) and pl.datatypes.Float64.is_null(value)):
-            return default
-        return float(value)
-    except (TypeError, ValueError, AttributeError):
-        return default
-    
-def _show_read_only_validation():
-    """Show read-only view of payslips when editing is not allowed"""
-    
-    if 'processed_data' not in st.session_state or st.session_state.processed_data.is_empty():
-        st.info("Aucune donnée disponible pour cette période.")
-        return
-    
-    df = st.session_state.processed_data
-    
-    # Filter and search bar
-    col1, col2 = st.columns([2, 2])
-    with col1:
-        search = st.text_input("🔍 Rechercher (matricule, nom, prénom)", "", key="readonly_search")
-    with col2:
-        status_filter = st.selectbox("Filtrer par statut", 
-                                     ["Tous", "À vérifier", "Validés"],
-                                     key="readonly_status")
-    
-    # Apply filters
-    filtered_df = df
-    if search:
-        filtered_df = filtered_df.filter(
-            pl.col('matricule').cast(pl.Utf8).str.contains(f"(?i){search}") |
-            pl.col('nom').cast(pl.Utf8).str.contains(f"(?i){search}") |
-            pl.col('prenom').cast(pl.Utf8).str.contains(f"(?i){search}")
-        )
-    
-    if status_filter == "À vérifier":
-        filtered_df = filtered_df.filter(pl.col('edge_case_flag') == True)
-    elif status_filter == "Validés":
-        filtered_df = filtered_df.filter(pl.col('statut_validation') == True)
-    
-    st.markdown("---")
-    
-    # Display employees in read-only mode
-    if filtered_df.is_empty():
-        st.info("Aucun employé trouvé avec ces critères")
-        return
-    
-    for row in filtered_df.iter_rows(named=True):
-        matricule = row.get('matricule', '')
-        is_edge_case = row.get('edge_case_flag', False)
-        is_validated = row.get('statut_validation', False) == True
-
-        status_icon = "⚠️" if is_edge_case else ("✅" if is_validated else "⏳")
-        title = f"{status_icon} {row.get('nom', '')} {row.get('prenom', '')} - {matricule} [LECTURE SEULE]"
-        
-        with st.expander(title):
-            # Show issues if any
-            if is_edge_case:
-                st.warning(f"**Raison:** {row.get('edge_case_reason', 'Non spécifiée')}")
-            
-            # Summary metrics
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Salaire brut", f"{row.get('salaire_brut', 0):,.2f} €")
-            with col2:
-                st.metric("Charges sal.", f"{row.get('total_charges_salariales', 0):,.2f} €")
-            with col3:
-                st.metric("Salaire net", f"{row.get('salaire_net', 0):,.2f} €")
-            with col4:
-                st.metric("Coût employeur", f"{row.get('cout_total_employeur', 0):,.2f} €")
-            
-            # Show detailed breakdown in tabs
-            tab1, tab2 = st.tabs(["💰 Éléments de Salaire", "📊 Charges Sociales"])
-            
-            with tab1:
-                st.markdown("**Éléments de rémunération:**")
-                salary_rubrics = get_salary_rubrics()
-                for rubric in salary_rubrics:
-                    field = rubric['field']
-                    value = safe_get_numeric(row, field, 0.0)
-                    if value > 0:
-                        st.text(f"• {rubric['label']} ({rubric['code']}): {value:.2f}")
-            
-            with tab2:
-                details_charges = row.get('details_charges', {})
-                if isinstance(details_charges, dict):
-                    charges_sal = details_charges.get('charges_salariales', {})
-                    charges_pat = details_charges.get('charges_patronales', {})
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown("**Charges salariales:**")
-                        if isinstance(charges_sal, dict):
-                            for code, amount in charges_sal.items():
-                                val = safe_get_charge_value(details_charges, 'charges_salariales', code)
-                                if val > 0:
-                                    st.text(f"• {code}: {val:.2f} €")
-                    
-                    with col2:
-                        st.markdown("**Charges patronales:**")
-                        if isinstance(charges_pat, dict):
-                            for code, amount in charges_pat.items():
-                                val = safe_get_charge_value(details_charges, 'charges_patronales', code)
-                                if val > 0:
-                                    st.text(f"• {code}: {val:.2f} €")
-
-# ============================================================================
 # ADMIN USER MANAGEMENT
 # ============================================================================
 def admin_panel():
@@ -2601,9 +2038,9 @@ def config_page():
         return
     
     system = st.session_state.payroll_system
-    
-    tab1, tab2, tab3, tab4 = st.tabs(["Entreprise", "Utilisateurs", "Paramètres", "Admin"])
-    
+
+    tab1, tab2, tab3 = st.tabs(["Entreprise", "Utilisateurs", "Admin"])
+
     with tab1:
         st.subheader("Informations de l'entreprise")
         
@@ -2613,14 +2050,23 @@ def config_page():
             address = st.text_area("Adresse", value=system.company_info.get('address', ''))
             phone = st.text_input("Téléphone", value=system.company_info.get('phone', ''))
             email = st.text_input("Email", value=system.company_info.get('email', ''))
-            
+
+            st.markdown("---")
+            st.markdown("**Déclaration Monaco (DSM)**")
+            employer_number_monaco = st.text_input(
+                "Numéro d'employeur Monaco",
+                value=system.company_info.get('employer_number_monaco', ''),
+                help="Numéro d'enregistrement auprès des Caisses Sociales de Monaco"
+            )
+
             if st.form_submit_button("💾 Sauvegarder"):
                 updated_info = {
                     'name': name,
                     'siret': siret,
                     'address': address,
                     'phone': phone,
-                    'email': email
+                    'email': email,
+                    'employer_number_monaco': employer_number_monaco
                 }
                 
                 config_file = CONFIG_DIR / "company_info.json"
@@ -2651,29 +2097,616 @@ def config_page():
         with col3:
             st.metric("Comptables", stats.get('comptable_users', 0))
 
-    
     with tab3:
-        st.subheader("Paramètres système")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.write("**Paramètres de calcul Monaco**")
-            plafond_ss = st.number_input("Plafond Sécurité Sociale T1", value=3428.00)
-            smic_horaire = st.number_input("SMIC horaire", value=11.65)
-            base_heures = st.number_input("Base heures légale", value=169.00)
-        
-        with col2:
-            st.write("**Taux de cotisations**")
-            st.info("Les taux sont définis selon la législation monégasque 2024")
-            st.write("CAR Salarial: 6.85%")
-            st.write("CAR Patronal: 8.35%")
-            st.write("CCSS: 14.75%")
-            st.write("CMRC: 5.22%")
-
-    with tab4:
         # Include the full admin panel in the configuration
+        st.info("ℹ️ Les paramètres de calcul (plafonds SS, SMIC, taux de cotisations) sont désormais gérés dans le fichier CSV: config/payroll_rates.csv")
         admin_panel()
+
+def email_config_page():
+    """Page de configuration des emails"""
+    st.title("⚙️ Configuration Email")
+
+    from services.email_archive import EmailConfigManager, EmailConfig
+    from pathlib import Path
+
+    config_manager = EmailConfigManager(Path("config/email_config.json"))
+
+    # Charger la configuration existante
+    existing_config = config_manager.load_config()
+
+    st.info("Configurez les paramètres SMTP pour l'envoi des emails de paie")
+
+    # Preset providers
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        provider = st.selectbox(
+            "Fournisseur email",
+            ["Gmail", "Outlook", "Office 365", "Autre (personnalisé)"]
+        )
+
+    # Default configs based on provider
+    defaults = {
+        "Gmail": {"server": "smtp.gmail.com", "port": 587, "use_tls": True, "use_ssl": False},
+        "Outlook": {"server": "smtp-mail.outlook.com", "port": 587, "use_tls": True, "use_ssl": False},
+        "Office 365": {"server": "smtp.office365.com", "port": 587, "use_tls": True, "use_ssl": False},
+        "Autre (personnalisé)": {"server": "", "port": 587, "use_tls": True, "use_ssl": False}
+    }
+
+    preset = defaults.get(provider, defaults["Autre (personnalisé)"])
+
+    st.markdown("---")
+
+    with st.form("email_config_form"):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            smtp_server = st.text_input(
+                "Serveur SMTP",
+                value=existing_config.smtp_server if existing_config else preset["server"],
+                help="ex: smtp.gmail.com"
+            )
+
+            smtp_port = st.number_input(
+                "Port SMTP",
+                value=existing_config.smtp_port if existing_config else preset["port"],
+                min_value=1,
+                max_value=65535
+            )
+
+            sender_email = st.text_input(
+                "Adresse email expéditeur",
+                value=existing_config.sender_email if existing_config else "",
+                help="ex: paie@monentreprise.com"
+            )
+
+            sender_password = st.text_input(
+                "Mot de passe / App Password",
+                type="password",
+                help="Pour Gmail/Outlook, utilisez un 'App Password' généré"
+            )
+
+        with col2:
+            sender_name = st.text_input(
+                "Nom de l'expéditeur",
+                value=existing_config.sender_name if existing_config else "Service Paie",
+                help="Nom affiché dans les emails"
+            )
+
+            use_tls = st.checkbox(
+                "Utiliser TLS (StartTLS)",
+                value=existing_config.use_tls if existing_config else preset["use_tls"]
+            )
+
+            use_ssl = st.checkbox(
+                "Utiliser SSL",
+                value=existing_config.use_ssl if existing_config else preset["use_ssl"]
+            )
+
+            reply_to = st.text_input(
+                "Adresse de réponse (optionnel)",
+                value=existing_config.reply_to if existing_config and existing_config.reply_to else ""
+            )
+
+            bcc_archive = st.text_input(
+                "BCC pour archivage (optionnel)",
+                value=existing_config.bcc_archive if existing_config and existing_config.bcc_archive else "",
+                help="Copie cachée pour archivage automatique"
+            )
+
+        col1, col2, col3 = st.columns([1, 1, 2])
+
+        with col1:
+            save_button = st.form_submit_button("💾 Sauvegarder", use_container_width=True)
+
+        with col2:
+            test_button = st.form_submit_button("🧪 Tester", use_container_width=True)
+
+    if save_button:
+        try:
+            # Créer la configuration
+            config = EmailConfig(
+                smtp_server=smtp_server,
+                smtp_port=smtp_port,
+                sender_email=sender_email,
+                sender_password=sender_password or (existing_config.sender_password if existing_config else ""),
+                sender_name=sender_name,
+                use_tls=use_tls,
+                use_ssl=use_ssl,
+                reply_to=reply_to if reply_to else None,
+                bcc_archive=bcc_archive if bcc_archive else None
+            )
+
+            # Sauvegarder
+            if config_manager.save_config(config, encrypt_password=True):
+                st.success("✅ Configuration sauvegardée avec succès!")
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.error("❌ Erreur lors de la sauvegarde")
+
+        except Exception as e:
+            st.error(f"❌ Erreur: {str(e)}")
+
+    if test_button:
+        try:
+            import smtplib
+            import ssl
+
+            # Tester la connexion SMTP
+            context = ssl.create_default_context()
+
+            with st.spinner("Test de connexion SMTP..."):
+                if use_ssl:
+                    server = smtplib.SMTP_SSL(smtp_server, smtp_port, context=context)
+                else:
+                    server = smtplib.SMTP(smtp_server, smtp_port)
+                    if use_tls:
+                        server.starttls(context=context)
+
+                server.login(sender_email, sender_password or (existing_config.sender_password if existing_config else ""))
+                server.quit()
+
+            st.success("✅ Connexion SMTP réussie!")
+
+        except Exception as e:
+            st.error(f"❌ Échec du test: {str(e)}")
+
+    # Afficher la config actuelle
+    if existing_config:
+        st.markdown("---")
+        st.subheader("Configuration actuelle")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Serveur SMTP", f"{existing_config.smtp_server}:{existing_config.smtp_port}")
+            st.metric("Expéditeur", existing_config.sender_email)
+
+        with col2:
+            st.metric("TLS/SSL", f"TLS: {existing_config.use_tls} | SSL: {existing_config.use_ssl}")
+            st.metric("Nom affiché", existing_config.sender_name)
+
+
+def send_validation_email_page():
+    """Page d'envoi des emails de validation au client"""
+    st.title("📧 Envoi Validation Client")
+
+    from services.email_archive import create_email_distribution_system
+    from services.pdf_generation import PDFGeneratorService
+    from pathlib import Path
+    import time
+
+    # Vérifier la configuration email
+    config_path = Path("config/email_config.json")
+    if not config_path.exists():
+        st.error("❌ Configuration email non trouvée. Veuillez d'abord configurer l'email dans la page Configuration.")
+        if st.button("➡️ Aller à la configuration"):
+            st.session_state.current_page = "email_config"
+            st.rerun()
+        return
+
+    # Charger les données
+    company_id = st.session_state.get('current_company')
+    period_str = st.session_state.get('current_period', datetime.now().strftime("%m-%Y"))
+
+    if not company_id:
+        st.warning("Veuillez sélectionner une entreprise")
+        return
+
+    # Convertir la période au format YYYY-MM
+    try:
+        period_date = datetime.strptime(period_str, "%m-%Y")
+        period = period_date.strftime("%Y-%m")
+        month_year = period_date.strftime("%B %Y")
+    except:
+        st.error("Format de période invalide")
+        return
+
+    year = period_date.year
+    month = period_date.month
+
+    # Charger les données de paie
+    df_period = DataManager.load_period_data(company_id, month, year)
+
+    if df_period.height == 0:
+        st.warning(f"Aucune donnée de paie trouvée pour {month_year}")
+        return
+
+    st.info(f"📊 {df_period.height} salariés pour la période {month_year}")
+
+    # Formulaire d'envoi
+    with st.form("validation_email_form"):
+        st.subheader("Destinataire")
+
+        col1, col2 = st.columns([2, 1])
+
+        with col1:
+            client_email = st.text_input(
+                "Email du client (employeur)",
+                help="L'email de l'entreprise cliente qui recevra tous les documents pour validation"
+            )
+
+        with col2:
+            test_mode = st.checkbox("Mode test", value=True, help="Ne pas envoyer réellement l'email")
+
+        st.markdown("---")
+        st.subheader("Documents à envoyer")
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.info(f"📦 **{df_period.height}** bulletins de paie\n\n(archive ZIP)")
+        with col2:
+            st.info("📄 **Journal de paie**\n\n(récapitulatif consolidé)")
+        with col3:
+            st.info("📊 **Provision CP**\n\n(congés payés)")
+
+        st.markdown("---")
+
+        # Calculer le récapitulatif
+        total_brut = df_period.select(pl.col('salaire_brut').sum()).item()
+        total_net = df_period.select(pl.col('salaire_net').sum()).item()
+        total_charges_sal = df_period.select(pl.col('total_charges_salariales').sum()).item()
+        total_charges_pat = df_period.select(pl.col('total_charges_patronales').sum()).item()
+        total_cout = df_period.select(pl.col('cout_total_employeur').sum()).item()
+
+        st.subheader("Récapitulatif de la paie")
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Masse salariale brute", f"{total_brut:,.2f} €")
+            st.metric("Charges salariales", f"{total_charges_sal:,.2f} €")
+
+        with col2:
+            st.metric("Masse salariale nette", f"{total_net:,.2f} €", delta=None, delta_color="normal")
+            st.metric("Charges patronales", f"{total_charges_pat:,.2f} €")
+
+        with col3:
+            st.metric("Coût total employeur", f"{total_cout:,.2f} €", delta=None, delta_color="inverse")
+            st.metric("Nombre de salariés", df_period.height)
+
+        st.markdown("---")
+
+        submit_button = st.form_submit_button("📧 Envoyer l'email de validation", use_container_width=True, type="primary")
+
+    if submit_button:
+        if not client_email:
+            st.error("❌ Veuillez saisir l'adresse email du client")
+            return
+
+        try:
+            with st.spinner("Génération des documents PDF..."):
+                # Charger les informations de l'entreprise
+                system = IntegratedPayrollSystem()
+                company_info = system.company_info
+
+                # Générer les documents PDF
+                pdf_service = PDFGeneratorService(company_info)
+                documents = pdf_service.generate_monthly_documents(df_period, period)
+
+                # Préparer le résumé pour l'email
+                payroll_summary = {
+                    'total_brut': total_brut,
+                    'total_net': total_net,
+                    'total_charges_sal': total_charges_sal,
+                    'total_charges_pat': total_charges_pat,
+                    'total_cout': total_cout
+                }
+
+                progress_bar = st.progress(0, text="Préparation de l'email...")
+
+                # Créer le système d'email
+                email_system = create_email_distribution_system()
+                email_service = email_system['email_service']
+
+                progress_bar.progress(50, text="Envoi de l'email...")
+
+                # Envoyer l'email de validation
+                result = email_service.send_validation_email(
+                    client_email=client_email,
+                    company_name=company_info.get('name', 'Entreprise'),
+                    paystubs_buffers=documents['paystubs'],
+                    journal_buffer=documents['journal'],
+                    pto_buffer=documents['pto_provision'],
+                    period=period,
+                    payroll_summary=payroll_summary,
+                    test_mode=test_mode
+                )
+
+                progress_bar.progress(100, text="Terminé!")
+                time.sleep(0.5)
+                progress_bar.empty()
+
+                if result['success']:
+                    if test_mode:
+                        st.success(f"✅ [MODE TEST] L'email aurait été envoyé à: {client_email}")
+                        st.info(f"📎 Pièces jointes: {result.get('attachments_count', 3)} fichiers")
+                    else:
+                        st.success(f"✅ Email de validation envoyé avec succès à: {client_email}")
+                        st.balloons()
+
+                    # Afficher un aperçu
+                    with st.expander("📋 Aperçu de l'email envoyé"):
+                        st.markdown(f"""
+                        **À:** {client_email}
+
+                        **Sujet:** Validation paie - {company_info.get('name', 'Entreprise')} - {month_year}
+
+                        **Documents joints:**
+                        - bulletins_paie_{period}.zip ({df_period.height} bulletins)
+                        - journal_paie_{period}.pdf
+                        - provision_cp_{period}.pdf
+
+                        **Récapitulatif:**
+                        - Masse salariale brute: {total_brut:,.2f} €
+                        - Charges salariales: {total_charges_sal:,.2f} €
+                        - Charges patronales: {total_charges_pat:,.2f} €
+                        - Masse salariale nette: {total_net:,.2f} €
+                        - Coût total employeur: {total_cout:,.2f} €
+                        """)
+                else:
+                    st.error(f"❌ Échec de l'envoi: {result.get('error', 'Erreur inconnue')}")
+
+        except Exception as e:
+            st.error(f"❌ Erreur: {str(e)}")
+            import traceback
+            with st.expander("Détails de l'erreur"):
+                st.code(traceback.format_exc())
+
+
+def dsm_declaration_page():
+    """Page de génération de la déclaration DSM Monaco"""
+    st.title("📄 Déclaration DSM Monaco")
+
+    from services.dsm_xml_generator import DSMXMLGenerator
+    from services.payroll_calculations import MonacoPayrollConstants
+    import time
+
+    st.info("Génération de la déclaration sociale mensuelle pour les Caisses Sociales de Monaco")
+
+    # Load company info
+    system = IntegratedPayrollSystem()
+    company_info = system.company_info
+
+    # Check if employer number is configured
+    employer_number = company_info.get('employer_number_monaco', '')
+
+    if not employer_number:
+        st.warning("⚠️ Numéro d'employeur Monaco non configuré")
+        st.info("Veuillez configurer le numéro d'employeur dans la page Configuration → Entreprise")
+
+        if st.session_state.role == "admin":
+            with st.expander("➕ Configurer maintenant"):
+                with st.form("quick_employer_config"):
+                    new_employer_number = st.text_input(
+                        "Numéro d'employeur Monaco",
+                        help="Numéro d'enregistrement auprès des Caisses Sociales de Monaco"
+                    )
+
+                    if st.form_submit_button("💾 Sauvegarder"):
+                        if new_employer_number:
+                            company_info['employer_number_monaco'] = new_employer_number
+                            config_file = CONFIG_DIR / "company_info.json"
+                            with open(config_file, 'w', encoding='utf-8') as f:
+                                json.dump(company_info, f, indent=2)
+                            st.success("✅ Numéro d'employeur sauvegardé!")
+                            time.sleep(1)
+                            st.rerun()
+        return
+
+    # Load period data
+    company_id = st.session_state.get('current_company')
+    period_str = st.session_state.get('current_period', datetime.now().strftime("%m-%Y"))
+
+    if not company_id:
+        st.warning("Veuillez sélectionner une entreprise")
+        return
+
+    # Convert period
+    try:
+        period_date = datetime.strptime(period_str, "%m-%Y")
+        period = period_date.strftime("%Y-%m")
+        month_year = period_date.strftime("%B %Y")
+    except:
+        st.error("Format de période invalide")
+        return
+
+    year = period_date.year
+    month = period_date.month
+
+    # Load payroll data
+    df_period = DataManager.load_period_data(company_id, month, year)
+
+    if df_period.height == 0:
+        st.warning(f"Aucune donnée de paie trouvée pour {month_year}")
+        st.info("Veuillez d'abord traiter la paie pour cette période dans 'Traitement des paies'")
+        return
+
+    st.success(f"✅ {df_period.height} salariés trouvés pour {month_year}")
+
+    # Configuration section
+    st.markdown("---")
+    st.subheader("Configuration DSM")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric("Numéro employeur", employer_number)
+
+    with col2:
+        st.metric("Période", period)
+
+    with col3:
+        # Get plafond from constants
+        constants = MonacoPayrollConstants(year)
+        plafond_t1 = constants.PLAFOND_SS_T1
+        st.metric("Plafond SS T1", f"{plafond_t1:,.2f} €")
+
+    # Employee configuration section
+    st.markdown("---")
+    st.subheader("Configuration des employés")
+
+    st.info("""
+    Les champs suivants sont requis pour la déclaration DSM.
+    Vous pouvez configurer les valeurs par défaut ou modifier individuellement chaque employé.
+    """)
+
+    # Default values
+    with st.expander("⚙️ Valeurs par défaut"):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            default_affiliation_ac = st.selectbox("Affiliation AC (par défaut)", ["Oui", "Non"], index=0)
+            default_affiliation_rc = st.selectbox("Affiliation RC (par défaut)", ["Oui", "Non"], index=0)
+            default_affiliation_car = st.selectbox("Affiliation CAR (par défaut)", ["Oui", "Non"], index=0)
+
+        with col2:
+            default_teletravail = st.selectbox("Télétravail (par défaut)", ["Non", "Oui"], index=0)
+            default_admin_salarie = st.selectbox("Administrateur salarié (par défaut)", ["Non", "Oui"], index=0)
+
+        if st.button("📝 Appliquer les valeurs par défaut à tous les employés", use_container_width=True):
+            # Apply defaults to all employees missing these values
+            df_period = df_period.with_columns([
+                pl.when(pl.col('affiliation_ac').is_null())
+                .then(pl.lit(default_affiliation_ac))
+                .otherwise(pl.col('affiliation_ac'))
+                .alias('affiliation_ac'),
+
+                pl.when(pl.col('affiliation_rc').is_null())
+                .then(pl.lit(default_affiliation_rc))
+                .otherwise(pl.col('affiliation_rc'))
+                .alias('affiliation_rc'),
+
+                pl.when(pl.col('affiliation_car').is_null())
+                .then(pl.lit(default_affiliation_car))
+                .otherwise(pl.col('affiliation_car'))
+                .alias('affiliation_car'),
+
+                pl.when(pl.col('teletravail').is_null())
+                .then(pl.lit(default_teletravail))
+                .otherwise(pl.col('teletravail'))
+                .alias('teletravail'),
+
+                pl.when(pl.col('administrateur_salarie').is_null())
+                .then(pl.lit(default_admin_salarie))
+                .otherwise(pl.col('administrateur_salarie'))
+                .alias('administrateur_salarie'),
+            ])
+
+            # Save updated data
+            DataManager.save_period_data(df_period, company_id, month, year)
+            st.success("✅ Valeurs par défaut appliquées!")
+            st.rerun()
+
+    # Show employee data with missing fields
+    missing_fields_df = df_period.filter(
+        pl.col('date_naissance').is_null() |
+        pl.col('affiliation_ac').is_null() |
+        pl.col('affiliation_rc').is_null() |
+        pl.col('affiliation_car').is_null()
+    )
+
+    if missing_fields_df.height > 0:
+        st.warning(f"⚠️ {missing_fields_df.height} employé(s) avec des champs manquants pour la DSM")
+        with st.expander("Voir les employés concernés"):
+            display_cols = ['matricule', 'nom', 'prenom']
+            if 'date_naissance' in missing_fields_df.columns:
+                display_cols.append('date_naissance')
+            st.dataframe(
+                missing_fields_df.select(display_cols).to_pandas(),
+                use_container_width=True
+            )
+            st.info("💡 Ajoutez ces informations dans le fichier Excel d'import ou configurez-les individuellement")
+
+    # Generation section
+    st.markdown("---")
+    st.subheader("Génération du fichier XML")
+
+    col1, col2 = st.columns([2, 1])
+
+    with col1:
+        recipient_email = st.text_input(
+            "Email destinataire (Caisses Sociales Monaco)",
+            help="Email pour l'envoi de la déclaration DSM (optionnel)"
+        )
+
+    with col2:
+        include_in_email = st.checkbox("Inclure dans l'email", value=False, disabled=not recipient_email)
+
+    # Summary
+    st.markdown("### 📊 Récapitulatif")
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("Employés", df_period.height)
+
+    with col2:
+        total_brut = df_period.select(pl.col('salaire_brut').sum()).item()
+        st.metric("Masse salariale brute", f"{total_brut:,.0f} €")
+
+    with col3:
+        # Calculate total base CCSS
+        total_ccss = total_brut
+        st.metric("Base CCSS totale", f"{total_ccss:,.0f} €")
+
+    with col4:
+        # Calculate total base CAR
+        total_car = df_period.select(pl.col('salaire_brut').sum()).item()
+        st.metric("Base CAR totale", f"{total_car:,.0f} €")
+
+    st.markdown("---")
+
+    # Generation button
+    col1, col2, col3 = st.columns([1, 1, 1])
+
+    with col2:
+        generate_button = st.button(
+            "📄 Générer la déclaration DSM",
+            type="primary",
+            use_container_width=True
+        )
+
+    if generate_button:
+        try:
+            with st.spinner("Génération du fichier XML DSM en cours..."):
+                # Create generator
+                generator = DSMXMLGenerator(employer_number, plafond_t1)
+
+                # Generate XML
+                xml_buffer = generator.generate_dsm_xml(df_period, period)
+
+                # Get XML content for display
+                xml_buffer.seek(0)
+                xml_content = xml_buffer.read().decode('UTF-8')
+                xml_buffer.seek(0)
+
+                st.success("✅ Déclaration DSM générée avec succès!")
+
+                # Download button
+                col1, col2, col3 = st.columns([1, 2, 1])
+                with col2:
+                    st.download_button(
+                        label="📥 Télécharger DSM XML",
+                        data=xml_buffer.getvalue(),
+                        file_name=f"DSM_{employer_number}_{period}.xml",
+                        mime="application/xml",
+                        use_container_width=True
+                    )
+
+                # Preview
+                with st.expander("👁️ Aperçu du fichier XML"):
+                    st.code(xml_content, language="xml")
+
+                # Email option
+                if recipient_email and include_in_email:
+                    st.info("📧 La fonctionnalité d'envoi par email sera disponible prochainement")
+                    # TODO: Implement email sending when Caisses Sociales email is provided
+
+        except Exception as e:
+            st.error(f"❌ Erreur lors de la génération: {str(e)}")
+            import traceback
+            with st.expander("Détails de l'erreur"):
+                st.code(traceback.format_exc())
+
 
 # ============================================================================
 # MAIN EXECUTION
