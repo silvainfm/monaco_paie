@@ -719,7 +719,7 @@ def processing_page():
                     st.markdown("---")
                     st.subheader("🤖 Rapport de l'Agent Intelligent")
 
-                    col1, col2, col3 = st.columns(3)
+                    col1, col2, col3, col4 = st.columns(4)
                     with col1:
                         st.metric("Modifications automatiques", agent_report.automatic_count,
                                  help="Corrections effectuées avec confiance ≥95%")
@@ -729,6 +729,9 @@ def processing_page():
                     with col3:
                         st.metric("Anomalies détectées", len(agent_report.anomalies),
                                  help="Variations importantes (>15%) détectées")
+                    with col4:
+                        st.metric("Tendances analysées", len(agent_report.trends),
+                                 help="Analyses historiques sur 6 mois")
 
                     # Show automatic modifications
                     if agent_report.modifications:
@@ -751,6 +754,72 @@ def processing_page():
                                 {case['reason']}
                                 Remarque: {case.get('remark', 'N/A')}
                                 """)
+
+                    # Show historical trends
+                    if agent_report.trends:
+                        with st.expander(f"📈 Tendances Historiques ({len(agent_report.trends)} analyses)", expanded=False):
+                            st.info("Analyse des 6 derniers mois pour détecter les tendances et la volatilité")
+
+                            # Group by employee for better display
+                            employee_trends = {}
+                            for trend in agent_report.trends:
+                                key = trend.matricule
+                                if key not in employee_trends:
+                                    employee_trends[key] = {
+                                        'name': trend.employee_name,
+                                        'trends': []
+                                    }
+                                employee_trends[key]['trends'].append(trend)
+
+                            # Display by employee
+                            for matricule, emp_data in employee_trends.items():
+                                with st.expander(f"👤 {emp_data['name']} ({matricule})", expanded=False):
+                                    for trend in emp_data['trends']:
+                                        col1, col2, col3, col4 = st.columns(4)
+                                        with col1:
+                                            st.markdown(f"**{trend.field}**")
+                                        with col2:
+                                            direction_icon = "📈" if trend.trend_direction == "increasing" else "📉" if trend.trend_direction == "decreasing" else "➡️"
+                                            st.markdown(f"{direction_icon} {trend.trend_direction}")
+                                        with col3:
+                                            volatility_color = "🟢" if trend.volatility == "low" else "🟡" if trend.volatility == "medium" else "🔴"
+                                            st.markdown(f"{volatility_color} Volatilité: {trend.volatility}")
+                                        with col4:
+                                            st.markdown(f"Moyenne: {trend.avg_value:.2f}")
+
+                                        # Show mini chart
+                                        st.line_chart({trend.field: trend.values})
+
+                    # Excel Export
+                    st.markdown("---")
+                    st.markdown("### 📊 Export du Rapport")
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+                        try:
+                            excel_buffer = agent.export_to_excel(st.session_state.current_company, st.session_state.current_period)
+                            st.download_button(
+                                label="📥 Télécharger le rapport Excel",
+                                data=excel_buffer,
+                                file_name=f"rapport_agent_{st.session_state.current_company}_{st.session_state.current_period}_{agent_report.timestamp.strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                help="Rapport complet avec toutes les modifications, anomalies et tendances",
+                                use_container_width=True
+                            )
+                        except Exception as e:
+                            st.error(f"Erreur lors de la génération du rapport Excel: {e}")
+
+                    with col2:
+                        # JSON export (backup)
+                        report_json = json.dumps(agent_report.to_dict(), indent=2, ensure_ascii=False)
+                        st.download_button(
+                            label="📄 Télécharger le rapport JSON",
+                            data=report_json,
+                            file_name=f"rapport_agent_{st.session_state.current_company}_{st.session_state.current_period}_{agent_report.timestamp.strftime('%Y%m%d_%H%M%S')}.json",
+                            mime="application/json",
+                            help="Format JSON pour traitement automatique",
+                            use_container_width=True
+                        )
 
                     # Send email if requested
                     if send_email and accountant_email:

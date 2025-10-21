@@ -17,6 +17,8 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
+import io
+from xlsxwriter import Workbook
 
 logger = logging.getLogger(__name__)
 
@@ -49,11 +51,39 @@ class EdgeCaseModification:
 
 
 @dataclass
+class HistoricalTrend:
+    """Represents historical trend data for an employee"""
+    matricule: str
+    employee_name: str
+    field: str
+    months: List[str]
+    values: List[float]
+    avg_value: float
+    std_dev: float
+    trend_direction: str  # 'increasing', 'decreasing', 'stable'
+    volatility: str  # 'low', 'medium', 'high'
+
+    def to_dict(self) -> Dict:
+        return {
+            'matricule': self.matricule,
+            'employee_name': self.employee_name,
+            'field': self.field,
+            'months': self.months,
+            'values': self.values,
+            'avg_value': self.avg_value,
+            'std_dev': self.std_dev,
+            'trend_direction': self.trend_direction,
+            'volatility': self.volatility
+        }
+
+
+@dataclass
 class EdgeCaseReport:
     """Report of all modifications and flagged cases"""
     modifications: List[EdgeCaseModification] = field(default_factory=list)
     flagged_cases: List[Dict] = field(default_factory=list)
     anomalies: List[Dict] = field(default_factory=list)
+    trends: List[HistoricalTrend] = field(default_factory=list)
     processed_count: int = 0
     automatic_count: int = 0
     flagged_count: int = 0
@@ -64,6 +94,7 @@ class EdgeCaseReport:
             'modifications': [m.to_dict() for m in self.modifications],
             'flagged_cases': self.flagged_cases,
             'anomalies': self.anomalies,
+            'trends': [t.to_dict() for t in self.trends],
             'processed_count': self.processed_count,
             'automatic_count': self.automatic_count,
             'flagged_count': self.flagged_count,
@@ -256,6 +287,9 @@ class EdgeCaseAgent:
         self.report.processed_count = len(modified_rows)
         self.report.automatic_count = sum(1 for m in self.report.modifications if m.automatic)
         self.report.flagged_count = len(self.report.flagged_cases)
+
+        # Analyze historical trends
+        self._analyze_historical_trends(company, month, year, modified_df)
 
         logger.info(f"Edge case processing complete: {self.report.automatic_count} automatic, {self.report.flagged_count} flagged")
 
@@ -532,6 +566,131 @@ class EdgeCaseAgent:
             return 12, year - 1
         return month - 1, year
 
+    def _analyze_historical_trends(self, company: str, month: int, year: int, current_df: pl.DataFrame):
+        """
+        Analyze historical trends across the last 6 months
+
+        Args:
+            company: Company name
+            month: Current month
+            year: Current year
+            current_df: Current month's data
+        """
+        logger.info("Analyzing historical trends...")
+
+        # Load last 6 months of data
+        historical_data = []
+        for i in range(6, 0, -1):
+            hist_month = month - i
+            hist_year = year
+            while hist_month <= 0:
+                hist_month += 12
+                hist_year -= 1
+
+            hist_df = self.data_consolidator.load_period_data(company, hist_month, hist_year)
+            if hist_df is not None and not (isinstance(hist_df, pl.DataFrame) and hist_df.is_empty()):
+                if not isinstance(hist_df, pl.DataFrame):
+                    hist_df = pl.DataFrame(hist_df)
+                historical_data.append({
+                    'month': f"{hist_month:02d}-{hist_year}",
+                    'data': hist_df
+                })
+
+        if not historical_data:
+            logger.warning("No historical data available for trend analysis")
+            return
+
+        # Analyze trends for each employee in current month
+        for row in current_df.iter_rows(named=True):
+            matricule = row.get('matricule', '')
+            employee_name = f"{row.get('nom', '')} {row.get('prenom', '')}"
+
+            # Analyze key fields
+            for field in ['salaire_brut', 'salaire_net', 'heures_travaillees']:
+                if field not in row:
+                    continue
+
+                months = []
+                values = []
+
+                # Collect historical values
+                for hist_entry in historical_data:
+                    hist_df = hist_entry['data']
+                    emp_data = hist_df.filter(pl.col('matricule') == matricule)
+
+                    if not emp_data.is_empty():
+                        emp_row = emp_data.to_dicts()[0]
+                        if field in emp_row and emp_row[field] is not None:
+                            months.append(hist_entry['month'])
+                            try:
+                                values.append(float(emp_row[field]))
+                            except (ValueError, TypeError):
+                                continue
+
+                # Add current month
+                if row[field] is not None:
+                    months.append(f"{month:02d}-{year}")
+                    try:
+                        values.append(float(row[field]))
+                    except (ValueError, TypeError):
+                        pass
+
+                # Only analyze if we have at least 3 data points
+                if len(values) >= 3:
+                    import statistics
+
+                    avg_value = statistics.mean(values)
+                    std_dev = statistics.stdev(values) if len(values) > 1 else 0
+
+                    # Determine trend direction
+                    if len(values) >= 2:
+                        recent_trend = values[-1] - values[-2]
+                        if abs(recent_trend) < avg_value * 0.05:  # Less than 5% change
+                            trend_direction = 'stable'
+                        elif recent_trend > 0:
+                            trend_direction = 'increasing'
+                        else:
+                            trend_direction = 'decreasing'
+                    else:
+                        trend_direction = 'stable'
+
+                    # Determine volatility
+                    cv = (std_dev / avg_value) if avg_value > 0 else 0  # Coefficient of variation
+                    if cv < 0.10:
+                        volatility = 'low'
+                    elif cv < 0.25:
+                        volatility = 'medium'
+                    else:
+                        volatility = 'high'
+
+                    # Create trend object
+                    trend = HistoricalTrend(
+                        matricule=matricule,
+                        employee_name=employee_name,
+                        field=field,
+                        months=months,
+                        values=values,
+                        avg_value=avg_value,
+                        std_dev=std_dev,
+                        trend_direction=trend_direction,
+                        volatility=volatility
+                    )
+
+                    self.report.trends.append(trend)
+
+                    # Flag high volatility cases
+                    if volatility == 'high':
+                        self.report.flagged_cases.append({
+                            'matricule': matricule,
+                            'employee_name': employee_name,
+                            'reason': f"Volatilité élevée détectée sur {field} (écart-type: {std_dev:.2f})",
+                            'field': field,
+                            'volatility': volatility,
+                            'month': f"{month:02d}-{year}"
+                        })
+
+        logger.info(f"Historical trend analysis complete: {len(self.report.trends)} trends identified")
+
     def generate_email_summary(self, accountant_email: str) -> Dict:
         """
         Generate email summary for the accountant
@@ -760,3 +919,208 @@ Anomalies détectées: {len(self.report.anomalies)}
         except Exception as e:
             logger.error(f"Failed to send email report: {e}")
             return False
+
+    def export_to_excel(self, company: str, month: str) -> io.BytesIO:
+        """
+        Export comprehensive agent report to Excel
+
+        Args:
+            company: Company name
+            month: Month string (MM-YYYY)
+
+        Returns:
+            BytesIO buffer containing Excel file
+        """
+        output = io.BytesIO()
+        workbook = Workbook(output, {'in_memory': True})
+
+        # Define formats
+        header_format = workbook.add_format({
+            'bold': True,
+            'bg_color': '#34495e',
+            'font_color': 'white',
+            'border': 1
+        })
+        auto_format = workbook.add_format({
+            'bg_color': '#d4edda',
+            'border': 1
+        })
+        manual_format = workbook.add_format({
+            'bg_color': '#fff3cd',
+            'border': 1
+        })
+        anomaly_format = workbook.add_format({
+            'bg_color': '#f8d7da',
+            'border': 1
+        })
+        number_format = workbook.add_format({
+            'num_format': '#,##0.00',
+            'border': 1
+        })
+
+        # SHEET 1: Summary
+        summary_sheet = workbook.add_worksheet('Résumé')
+        summary_sheet.write('A1', 'RAPPORT DE TRAITEMENT AUTOMATIQUE DES PAIES', header_format)
+        summary_sheet.write('A2', f'Entreprise: {company}')
+        summary_sheet.write('A3', f'Période: {month}')
+        summary_sheet.write('A4', f'Date du rapport: {self.report.timestamp.strftime("%d/%m/%Y %H:%M")}')
+
+        summary_sheet.write('A6', 'Statistiques', header_format)
+        summary_sheet.write('A7', 'Employés traités:')
+        summary_sheet.write('B7', self.report.processed_count)
+        summary_sheet.write('A8', 'Modifications automatiques:')
+        summary_sheet.write('B8', self.report.automatic_count)
+        summary_sheet.write('A9', 'Cas signalés:')
+        summary_sheet.write('B9', self.report.flagged_count)
+        summary_sheet.write('A10', 'Anomalies détectées:')
+        summary_sheet.write('B10', len(self.report.anomalies))
+        summary_sheet.write('A11', 'Tendances analysées:')
+        summary_sheet.write('B11', len(self.report.trends))
+
+        # SHEET 2: Automatic Modifications
+        if self.report.modifications:
+            mods_sheet = workbook.add_worksheet('Modifications Auto')
+            headers = ['Matricule', 'Employé', 'Champ', 'Ancienne Valeur', 'Nouvelle Valeur', 'Raison', 'Confiance %']
+            for col, header in enumerate(headers):
+                mods_sheet.write(0, col, header, header_format)
+
+            row = 1
+            for mod in self.report.modifications:
+                if mod.automatic:
+                    mods_sheet.write(row, 0, mod.matricule, auto_format)
+                    mods_sheet.write(row, 1, mod.employee_name, auto_format)
+                    mods_sheet.write(row, 2, mod.field, auto_format)
+                    mods_sheet.write(row, 3, mod.old_value, number_format)
+                    mods_sheet.write(row, 4, mod.new_value, number_format)
+                    mods_sheet.write(row, 5, mod.reason, auto_format)
+                    mods_sheet.write(row, 6, mod.confidence * 100, auto_format)
+                    row += 1
+
+            mods_sheet.autofilter(0, 0, row - 1, len(headers) - 1)
+            mods_sheet.set_column('A:A', 12)
+            mods_sheet.set_column('B:B', 25)
+            mods_sheet.set_column('C:C', 20)
+            mods_sheet.set_column('D:E', 15)
+            mods_sheet.set_column('F:F', 50)
+            mods_sheet.set_column('G:G', 12)
+
+        # SHEET 3: Flagged Cases
+        if self.report.flagged_cases:
+            flagged_sheet = workbook.add_worksheet('Cas Signalés')
+            headers = ['Matricule', 'Employé', 'Raison', 'Remarque', 'Mois']
+            for col, header in enumerate(headers):
+                flagged_sheet.write(0, col, header, header_format)
+
+            row = 1
+            for case in self.report.flagged_cases:
+                flagged_sheet.write(row, 0, case.get('matricule', ''), manual_format)
+                flagged_sheet.write(row, 1, case.get('employee_name', ''), manual_format)
+                flagged_sheet.write(row, 2, case.get('reason', ''), manual_format)
+                flagged_sheet.write(row, 3, case.get('remark', ''), manual_format)
+                flagged_sheet.write(row, 4, case.get('month', ''), manual_format)
+                row += 1
+
+            flagged_sheet.autofilter(0, 0, row - 1, len(headers) - 1)
+            flagged_sheet.set_column('A:A', 12)
+            flagged_sheet.set_column('B:B', 25)
+            flagged_sheet.set_column('C:C', 40)
+            flagged_sheet.set_column('D:D', 40)
+            flagged_sheet.set_column('E:E', 12)
+
+        # SHEET 4: Anomalies
+        if self.report.anomalies:
+            anomaly_sheet = workbook.add_worksheet('Anomalies')
+            headers = ['Matricule', 'Employé', 'Champ', 'Valeur Précédente', 'Valeur Actuelle', 'Variation %']
+            for col, header in enumerate(headers):
+                anomaly_sheet.write(0, col, header, header_format)
+
+            row = 1
+            for anomaly in self.report.anomalies:
+                anomaly_sheet.write(row, 0, anomaly['matricule'], anomaly_format)
+                anomaly_sheet.write(row, 1, anomaly['employee_name'], anomaly_format)
+                anomaly_sheet.write(row, 2, anomaly['field'], anomaly_format)
+                anomaly_sheet.write(row, 3, anomaly['previous_value'], number_format)
+                anomaly_sheet.write(row, 4, anomaly['current_value'], number_format)
+                anomaly_sheet.write(row, 5, anomaly['change_percent'], number_format)
+                row += 1
+
+            anomaly_sheet.autofilter(0, 0, row - 1, len(headers) - 1)
+            anomaly_sheet.set_column('A:A', 12)
+            anomaly_sheet.set_column('B:B', 25)
+            anomaly_sheet.set_column('C:C', 25)
+            anomaly_sheet.set_column('D:E', 15)
+            anomaly_sheet.set_column('F:F', 15)
+
+        # SHEET 5: Historical Trends
+        if self.report.trends:
+            trends_sheet = workbook.add_worksheet('Tendances Historiques')
+            headers = ['Matricule', 'Employé', 'Champ', 'Moyenne', 'Écart-type', 'Direction', 'Volatilité', 'Mois', 'Valeurs']
+            for col, header in enumerate(headers):
+                trends_sheet.write(0, col, header, header_format)
+
+            row = 1
+            for trend in self.report.trends:
+                trends_sheet.write(row, 0, trend.matricule)
+                trends_sheet.write(row, 1, trend.employee_name)
+                trends_sheet.write(row, 2, trend.field)
+                trends_sheet.write(row, 3, trend.avg_value, number_format)
+                trends_sheet.write(row, 4, trend.std_dev, number_format)
+                trends_sheet.write(row, 5, trend.trend_direction)
+                trends_sheet.write(row, 6, trend.volatility)
+                trends_sheet.write(row, 7, ', '.join(trend.months))
+                trends_sheet.write(row, 8, ', '.join([f"{v:.2f}" for v in trend.values]))
+                row += 1
+
+            trends_sheet.autofilter(0, 0, row - 1, len(headers) - 1)
+            trends_sheet.set_column('A:A', 12)
+            trends_sheet.set_column('B:B', 25)
+            trends_sheet.set_column('C:C', 20)
+            trends_sheet.set_column('D:E', 15)
+            trends_sheet.set_column('F:F', 15)
+            trends_sheet.set_column('G:G', 12)
+            trends_sheet.set_column('H:H', 30)
+            trends_sheet.set_column('I:I', 40)
+
+        # SHEET 6: Detailed Trends by Employee (with sparklines if possible)
+        if self.report.trends:
+            detail_sheet = workbook.add_worksheet('Détails Tendances')
+
+            # Group trends by employee
+            employee_trends = {}
+            for trend in self.report.trends:
+                key = f"{trend.matricule}_{trend.employee_name}"
+                if key not in employee_trends:
+                    employee_trends[key] = []
+                employee_trends[key].append(trend)
+
+            row = 0
+            for emp_key, trends in employee_trends.items():
+                # Employee header
+                detail_sheet.write(row, 0, trends[0].employee_name, header_format)
+                detail_sheet.write(row, 1, f"({trends[0].matricule})", header_format)
+                row += 1
+
+                # Trend details for this employee
+                for trend in trends:
+                    detail_sheet.write(row, 0, trend.field)
+                    detail_sheet.write(row, 1, f"Direction: {trend.trend_direction}")
+                    detail_sheet.write(row, 2, f"Volatilité: {trend.volatility}")
+                    detail_sheet.write(row, 3, f"Moyenne: {trend.avg_value:.2f}")
+
+                    # Write historical values
+                    for i, (month, value) in enumerate(zip(trend.months, trend.values)):
+                        detail_sheet.write(row, 4 + i, value, number_format)
+
+                    row += 1
+
+                row += 1  # Space between employees
+
+            detail_sheet.set_column('A:A', 20)
+            detail_sheet.set_column('B:C', 20)
+            detail_sheet.set_column('D:D', 15)
+
+        workbook.close()
+        output.seek(0)
+
+        logger.info("Excel report generated successfully")
+        return output
