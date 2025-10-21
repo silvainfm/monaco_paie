@@ -517,18 +517,20 @@ def dashboard_page():
         st.subheader("Distribution des salaires nets")
         if 'salaire_net' in df.columns and not df['salaire_net'].is_null().all():
             fig_data = df.select(pl.col('salaire_net').cast(pl.Float64).drop_nulls())
-            
-            # Create histogram using Polars
-            hist_df = fig_data.select(
-                pl.col('salaire_net').qcut(10, labels=[f"{i}" for i in range(10)])
-                .alias('bin')
-            ).group_by('bin').agg(pl.count().alias('count'))
-            
-            # Format labels
-            bins = fig_data.select(pl.col('salaire_net').qcut(10)).unique().sort()
-            
-            chart_data = hist_df.sort('bin').to_pandas().set_index('bin')['count']
-            st.bar_chart(chart_data)
+
+            # Create histogram using Polars with allow_duplicates to handle duplicate salary values
+            try:
+                hist_df = fig_data.select(
+                    pl.col('salaire_net').qcut(10, labels=[f"{i}" for i in range(10)], allow_duplicates=True)
+                    .alias('bin')
+                ).group_by('bin').agg(pl.count().alias('count'))
+
+                chart_data = hist_df.sort('bin').to_pandas().set_index('bin')['count']
+                st.bar_chart(chart_data)
+            except Exception as e:
+                # Fallback to simple histogram if qcut fails
+                st.info("Pas assez de données uniques pour créer un histogramme détaillé")
+                st.write(fig_data.select(pl.col('salaire_net').describe()).to_pandas())
     
     st.markdown("---")
     st.subheader("Employés avec cas particuliers")
