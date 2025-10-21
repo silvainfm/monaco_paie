@@ -505,14 +505,16 @@ def main_app():
         
         pages = {
             "📊 Tableau de bord": "dashboard",
-            "📥 Import des données": "import", 
+            "📥 Import des données": "import",
             "💰 Traitement des paies": "processing",
             "✅ Validation": "validation",
             "📄 Génération PDF": "pdf_generation",
+            "📧 Envoi Validation Client": "send_validation_email",
             "📄 Export des résultats": "export"
         }
-        
+
         if st.session_state.role == "admin":
+            pages["⚙️ Configuration Email"] = "email_config"
             pages["⚙️ Configuration"] = "config"
             pages["📋 Journal modifications"] = "audit_log"
         
@@ -546,8 +548,12 @@ def main_app():
         validation_page()
     elif current_page == "pdf_generation":
         pdf_generation_page()
+    elif current_page == "send_validation_email":
+        send_validation_email_page()
     elif current_page == "export":
         export_page()
+    elif current_page == "email_config":
+        email_config_page()
     elif current_page == "config":
         config_page()
     elif current_page == "audit_log":
@@ -2674,6 +2680,356 @@ def config_page():
     with tab4:
         # Include the full admin panel in the configuration
         admin_panel()
+
+def email_config_page():
+    """Page de configuration des emails"""
+    st.title("⚙️ Configuration Email")
+
+    from services.email_archive import EmailConfigManager, EmailConfig
+    from pathlib import Path
+
+    config_manager = EmailConfigManager(Path("config/email_config.json"))
+
+    # Charger la configuration existante
+    existing_config = config_manager.load_config()
+
+    st.info("Configurez les paramètres SMTP pour l'envoi des emails de paie")
+
+    # Preset providers
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        provider = st.selectbox(
+            "Fournisseur email",
+            ["Gmail", "Outlook", "Office 365", "Autre (personnalisé)"]
+        )
+
+    # Default configs based on provider
+    defaults = {
+        "Gmail": {"server": "smtp.gmail.com", "port": 587, "use_tls": True, "use_ssl": False},
+        "Outlook": {"server": "smtp-mail.outlook.com", "port": 587, "use_tls": True, "use_ssl": False},
+        "Office 365": {"server": "smtp.office365.com", "port": 587, "use_tls": True, "use_ssl": False},
+        "Autre (personnalisé)": {"server": "", "port": 587, "use_tls": True, "use_ssl": False}
+    }
+
+    preset = defaults.get(provider, defaults["Autre (personnalisé)"])
+
+    st.markdown("---")
+
+    with st.form("email_config_form"):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            smtp_server = st.text_input(
+                "Serveur SMTP",
+                value=existing_config.smtp_server if existing_config else preset["server"],
+                help="ex: smtp.gmail.com"
+            )
+
+            smtp_port = st.number_input(
+                "Port SMTP",
+                value=existing_config.smtp_port if existing_config else preset["port"],
+                min_value=1,
+                max_value=65535
+            )
+
+            sender_email = st.text_input(
+                "Adresse email expéditeur",
+                value=existing_config.sender_email if existing_config else "",
+                help="ex: paie@monentreprise.com"
+            )
+
+            sender_password = st.text_input(
+                "Mot de passe / App Password",
+                type="password",
+                help="Pour Gmail/Outlook, utilisez un 'App Password' généré"
+            )
+
+        with col2:
+            sender_name = st.text_input(
+                "Nom de l'expéditeur",
+                value=existing_config.sender_name if existing_config else "Service Paie",
+                help="Nom affiché dans les emails"
+            )
+
+            use_tls = st.checkbox(
+                "Utiliser TLS (StartTLS)",
+                value=existing_config.use_tls if existing_config else preset["use_tls"]
+            )
+
+            use_ssl = st.checkbox(
+                "Utiliser SSL",
+                value=existing_config.use_ssl if existing_config else preset["use_ssl"]
+            )
+
+            reply_to = st.text_input(
+                "Adresse de réponse (optionnel)",
+                value=existing_config.reply_to if existing_config and existing_config.reply_to else ""
+            )
+
+            bcc_archive = st.text_input(
+                "BCC pour archivage (optionnel)",
+                value=existing_config.bcc_archive if existing_config and existing_config.bcc_archive else "",
+                help="Copie cachée pour archivage automatique"
+            )
+
+        col1, col2, col3 = st.columns([1, 1, 2])
+
+        with col1:
+            save_button = st.form_submit_button("💾 Sauvegarder", use_container_width=True)
+
+        with col2:
+            test_button = st.form_submit_button("🧪 Tester", use_container_width=True)
+
+    if save_button:
+        try:
+            # Créer la configuration
+            config = EmailConfig(
+                smtp_server=smtp_server,
+                smtp_port=smtp_port,
+                sender_email=sender_email,
+                sender_password=sender_password or (existing_config.sender_password if existing_config else ""),
+                sender_name=sender_name,
+                use_tls=use_tls,
+                use_ssl=use_ssl,
+                reply_to=reply_to if reply_to else None,
+                bcc_archive=bcc_archive if bcc_archive else None
+            )
+
+            # Sauvegarder
+            if config_manager.save_config(config, encrypt_password=True):
+                st.success("✅ Configuration sauvegardée avec succès!")
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.error("❌ Erreur lors de la sauvegarde")
+
+        except Exception as e:
+            st.error(f"❌ Erreur: {str(e)}")
+
+    if test_button:
+        try:
+            import smtplib
+            import ssl
+
+            # Tester la connexion SMTP
+            context = ssl.create_default_context()
+
+            with st.spinner("Test de connexion SMTP..."):
+                if use_ssl:
+                    server = smtplib.SMTP_SSL(smtp_server, smtp_port, context=context)
+                else:
+                    server = smtplib.SMTP(smtp_server, smtp_port)
+                    if use_tls:
+                        server.starttls(context=context)
+
+                server.login(sender_email, sender_password or (existing_config.sender_password if existing_config else ""))
+                server.quit()
+
+            st.success("✅ Connexion SMTP réussie!")
+
+        except Exception as e:
+            st.error(f"❌ Échec du test: {str(e)}")
+
+    # Afficher la config actuelle
+    if existing_config:
+        st.markdown("---")
+        st.subheader("Configuration actuelle")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Serveur SMTP", f"{existing_config.smtp_server}:{existing_config.smtp_port}")
+            st.metric("Expéditeur", existing_config.sender_email)
+
+        with col2:
+            st.metric("TLS/SSL", f"TLS: {existing_config.use_tls} | SSL: {existing_config.use_ssl}")
+            st.metric("Nom affiché", existing_config.sender_name)
+
+
+def send_validation_email_page():
+    """Page d'envoi des emails de validation au client"""
+    st.title("📧 Envoi Validation Client")
+
+    from services.email_archive import create_email_distribution_system
+    from services.pdf_generation import PDFGeneratorService
+    from pathlib import Path
+    import time
+
+    # Vérifier la configuration email
+    config_path = Path("config/email_config.json")
+    if not config_path.exists():
+        st.error("❌ Configuration email non trouvée. Veuillez d'abord configurer l'email dans la page Configuration.")
+        if st.button("➡️ Aller à la configuration"):
+            st.session_state.current_page = "email_config"
+            st.rerun()
+        return
+
+    # Charger les données
+    company_id = st.session_state.get('current_company')
+    period_str = st.session_state.get('current_period', datetime.now().strftime("%m-%Y"))
+
+    if not company_id:
+        st.warning("Veuillez sélectionner une entreprise")
+        return
+
+    # Convertir la période au format YYYY-MM
+    try:
+        period_date = datetime.strptime(period_str, "%m-%Y")
+        period = period_date.strftime("%Y-%m")
+        month_year = period_date.strftime("%B %Y")
+    except:
+        st.error("Format de période invalide")
+        return
+
+    year = period_date.year
+    month = period_date.month
+
+    # Charger les données de paie
+    df_period = DataManager.load_period_data(company_id, month, year)
+
+    if df_period.height == 0:
+        st.warning(f"Aucune donnée de paie trouvée pour {month_year}")
+        return
+
+    st.info(f"📊 {df_period.height} salariés pour la période {month_year}")
+
+    # Formulaire d'envoi
+    with st.form("validation_email_form"):
+        st.subheader("Destinataire")
+
+        col1, col2 = st.columns([2, 1])
+
+        with col1:
+            client_email = st.text_input(
+                "Email du client (employeur)",
+                help="L'email de l'entreprise cliente qui recevra tous les documents pour validation"
+            )
+
+        with col2:
+            test_mode = st.checkbox("Mode test", value=True, help="Ne pas envoyer réellement l'email")
+
+        st.markdown("---")
+        st.subheader("Documents à envoyer")
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.info(f"📦 **{df_period.height}** bulletins de paie\n\n(archive ZIP)")
+        with col2:
+            st.info("📄 **Journal de paie**\n\n(récapitulatif consolidé)")
+        with col3:
+            st.info("📊 **Provision CP**\n\n(congés payés)")
+
+        st.markdown("---")
+
+        # Calculer le récapitulatif
+        total_brut = df_period.select(pl.col('salaire_brut').sum()).item()
+        total_net = df_period.select(pl.col('salaire_net').sum()).item()
+        total_charges_sal = df_period.select(pl.col('total_charges_salariales').sum()).item()
+        total_charges_pat = df_period.select(pl.col('total_charges_patronales').sum()).item()
+        total_cout = df_period.select(pl.col('cout_total_employeur').sum()).item()
+
+        st.subheader("Récapitulatif de la paie")
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Masse salariale brute", f"{total_brut:,.2f} €")
+            st.metric("Charges salariales", f"{total_charges_sal:,.2f} €")
+
+        with col2:
+            st.metric("Masse salariale nette", f"{total_net:,.2f} €", delta=None, delta_color="normal")
+            st.metric("Charges patronales", f"{total_charges_pat:,.2f} €")
+
+        with col3:
+            st.metric("Coût total employeur", f"{total_cout:,.2f} €", delta=None, delta_color="inverse")
+            st.metric("Nombre de salariés", df_period.height)
+
+        st.markdown("---")
+
+        submit_button = st.form_submit_button("📧 Envoyer l'email de validation", use_container_width=True, type="primary")
+
+    if submit_button:
+        if not client_email:
+            st.error("❌ Veuillez saisir l'adresse email du client")
+            return
+
+        try:
+            with st.spinner("Génération des documents PDF..."):
+                # Charger les informations de l'entreprise
+                system = IntegratedPayrollSystem()
+                company_info = system.company_info
+
+                # Générer les documents PDF
+                pdf_service = PDFGeneratorService(company_info)
+                documents = pdf_service.generate_monthly_documents(df_period, period)
+
+                # Préparer le résumé pour l'email
+                payroll_summary = {
+                    'total_brut': total_brut,
+                    'total_net': total_net,
+                    'total_charges_sal': total_charges_sal,
+                    'total_charges_pat': total_charges_pat,
+                    'total_cout': total_cout
+                }
+
+                progress_bar = st.progress(0, text="Préparation de l'email...")
+
+                # Créer le système d'email
+                email_system = create_email_distribution_system()
+                email_service = email_system['email_service']
+
+                progress_bar.progress(50, text="Envoi de l'email...")
+
+                # Envoyer l'email de validation
+                result = email_service.send_validation_email(
+                    client_email=client_email,
+                    company_name=company_info.get('name', 'Entreprise'),
+                    paystubs_buffers=documents['paystubs'],
+                    journal_buffer=documents['journal'],
+                    pto_buffer=documents['pto_provision'],
+                    period=period,
+                    payroll_summary=payroll_summary,
+                    test_mode=test_mode
+                )
+
+                progress_bar.progress(100, text="Terminé!")
+                time.sleep(0.5)
+                progress_bar.empty()
+
+                if result['success']:
+                    if test_mode:
+                        st.success(f"✅ [MODE TEST] L'email aurait été envoyé à: {client_email}")
+                        st.info(f"📎 Pièces jointes: {result.get('attachments_count', 3)} fichiers")
+                    else:
+                        st.success(f"✅ Email de validation envoyé avec succès à: {client_email}")
+                        st.balloons()
+
+                    # Afficher un aperçu
+                    with st.expander("📋 Aperçu de l'email envoyé"):
+                        st.markdown(f"""
+                        **À:** {client_email}
+
+                        **Sujet:** Validation paie - {company_info.get('name', 'Entreprise')} - {month_year}
+
+                        **Documents joints:**
+                        - bulletins_paie_{period}.zip ({df_period.height} bulletins)
+                        - journal_paie_{period}.pdf
+                        - provision_cp_{period}.pdf
+
+                        **Récapitulatif:**
+                        - Masse salariale brute: {total_brut:,.2f} €
+                        - Charges salariales: {total_charges_sal:,.2f} €
+                        - Charges patronales: {total_charges_pat:,.2f} €
+                        - Masse salariale nette: {total_net:,.2f} €
+                        - Coût total employeur: {total_cout:,.2f} €
+                        """)
+                else:
+                    st.error(f"❌ Échec de l'envoi: {result.get('error', 'Erreur inconnue')}")
+
+        except Exception as e:
+            st.error(f"❌ Erreur: {str(e)}")
+            import traceback
+            with st.expander("Détails de l'erreur"):
+                st.code(traceback.format_exc())
+
 
 # ============================================================================
 # MAIN EXECUTION

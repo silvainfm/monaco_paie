@@ -72,20 +72,20 @@ class EmailTemplate:
     @staticmethod
     def get_default_paystub_template(language: str = "fr") -> 'EmailTemplate':
         """Obtenir le template par défaut pour les bulletins de paie"""
-        
+
         if language == "fr":
             subject = "Votre bulletin de paie - {month_year}"
-            
+
             body_html = """
             <html>
                 <body style="font-family: Arial, sans-serif; color: #333;">
                     <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
                         <h2 style="color: #2C3E50;">Bulletin de Paie - {month_year}</h2>
-                        
+
                         <p>Bonjour {prenom} {nom},</p>
-                        
+
                         <p>Veuillez trouver ci-joint votre bulletin de paie pour la période du <strong>{period_start}</strong> au <strong>{period_end}</strong>.</p>
-                        
+
                         <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;">
                             <h3 style="color: #495057; margin-top: 0;">Récapitulatif</h3>
                             <table style="width: 100%; border-collapse: collapse;">
@@ -103,18 +103,18 @@ class EmailTemplate:
                                 </tr>
                             </table>
                         </div>
-                        
+
                         <p>Ce document est à conserver sans limitation de durée pour faire valoir vos droits.</p>
-                        
+
                         <p>Pour toute question concernant votre bulletin de paie, n'hésitez pas à contacter le service paie.</p>
-                        
+
                         <hr style="border: none; border-top: 1px solid #dee2e6; margin: 30px 0;">
-                        
+
                         <p style="font-size: 12px; color: #6c757d;">
                             Cet email et ses pièces jointes sont confidentiels et destinés exclusivement à la personne à laquelle ils sont adressés.<br>
                             Si vous avez reçu cet email par erreur, merci de le signaler à l'expéditeur et de le supprimer.
                         </p>
-                        
+
                         <p style="font-size: 12px; color: #6c757d; margin-top: 20px;">
                             <strong>{company_name}</strong><br>
                             {company_address}<br>
@@ -124,37 +124,160 @@ class EmailTemplate:
                 </body>
             </html>
             """
-            
+
             body_text = """
             Bulletin de Paie - {month_year}
-            
+
             Bonjour {prenom} {nom},
-            
+
             Veuillez trouver ci-joint votre bulletin de paie pour la période du {period_start} au {period_end}.
-            
+
             Récapitulatif:
             - Salaire brut: {salaire_brut} €
             - Charges salariales: -{charges_salariales} €
             - Net à payer: {salaire_net} €
-            
+
             Ce document est à conserver sans limitation de durée pour faire valoir vos droits.
-            
+
             Pour toute question concernant votre bulletin de paie, n'hésitez pas à contacter le service paie.
-            
+
             Cordialement,
             {company_name}
             """
-            
+
         elif language == "it":
             subject = "La sua busta paga - {month_year}"
             body_html = """<html>...</html>"""  # Version italienne
             body_text = """..."""  # Version italienne
-        
+
         else:  # English default
             subject = "Your payslip - {month_year}"
             body_html = """<html>...</html>"""  # Version anglaise
             body_text = """..."""  # Version anglaise
-        
+
+        return EmailTemplate(subject=subject, body_html=body_html, body_text=body_text)
+
+    @staticmethod
+    def get_client_validation_template(language: str = "fr") -> 'EmailTemplate':
+        """Obtenir le template pour l'envoi de validation au client"""
+
+        if language == "fr":
+            subject = "Validation paie - {company_name} - {month_year}"
+
+            body_html = """
+            <html>
+                <body style="font-family: Arial, sans-serif; color: #333;">
+                    <div style="max-width: 700px; margin: 0 auto; padding: 20px;">
+                        <div style="background-color: #3498db; color: white; padding: 20px; border-radius: 5px 5px 0 0;">
+                            <h2 style="margin: 0;">Validation des Bulletins de Paie</h2>
+                            <p style="margin: 10px 0 0 0; font-size: 1.1em;">{company_name} - {month_year}</p>
+                        </div>
+
+                        <div style="border: 1px solid #dee2e6; border-top: none; padding: 25px; border-radius: 0 0 5px 5px;">
+                            <p>Bonjour,</p>
+
+                            <p>Veuillez trouver ci-joint les documents de paie pour la période <strong>{month_year}</strong> à valider avant envoi aux salariés :</p>
+
+                            <div style="background-color: #f8f9fa; padding: 20px; border-radius: 5px; margin: 25px 0;">
+                                <h3 style="color: #2c3e50; margin-top: 0; margin-bottom: 15px;">📎 Documents joints</h3>
+                                <ul style="line-height: 1.8; margin: 0; padding-left: 20px;">
+                                    <li><strong>Bulletins de paie ({employee_count} salariés)</strong> - Archive ZIP contenant tous les bulletins individuels</li>
+                                    <li><strong>Journal de paie</strong> - Récapitulatif consolidé de la période</li>
+                                    <li><strong>Provision congés payés</strong> - État des provisions CP au {month_year}</li>
+                                </ul>
+                            </div>
+
+                            <div style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 25px 0;">
+                                <h4 style="margin-top: 0; color: #856404;">⚠️ Action requise</h4>
+                                <p style="margin-bottom: 0; color: #856404;">
+                                    Merci de vérifier ces documents et de nous confirmer votre validation sous <strong>48h</strong>.<br>
+                                    Après validation, les bulletins seront envoyés automatiquement aux salariés.
+                                </p>
+                            </div>
+
+                            <div style="background-color: #e7f3ff; padding: 15px; border-radius: 5px; margin: 25px 0;">
+                                <h3 style="color: #0066cc; margin-top: 0; margin-bottom: 10px;">📊 Récapitulatif de la paie</h3>
+                                <table style="width: 100%; border-collapse: collapse;">
+                                    <tr>
+                                        <td style="padding: 8px 0; border-bottom: 1px solid #ccc;"><strong>Nombre de salariés :</strong></td>
+                                        <td style="text-align: right; padding: 8px 0; border-bottom: 1px solid #ccc;">{employee_count}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 8px 0; border-bottom: 1px solid #ccc;"><strong>Masse salariale brute :</strong></td>
+                                        <td style="text-align: right; padding: 8px 0; border-bottom: 1px solid #ccc;">{total_brut} €</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 8px 0; border-bottom: 1px solid #ccc;"><strong>Charges salariales :</strong></td>
+                                        <td style="text-align: right; padding: 8px 0; border-bottom: 1px solid #ccc;">{total_charges_sal} €</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 8px 0; border-bottom: 1px solid #ccc;"><strong>Charges patronales :</strong></td>
+                                        <td style="text-align: right; padding: 8px 0; border-bottom: 1px solid #ccc;">{total_charges_pat} €</td>
+                                    </tr>
+                                    <tr style="background-color: #d4edda;">
+                                        <td style="padding: 12px 0; font-weight: bold; color: #155724;"><strong>Masse salariale nette :</strong></td>
+                                        <td style="text-align: right; padding: 12px 0; font-weight: bold; color: #155724; font-size: 1.1em;">{total_net} €</td>
+                                    </tr>
+                                    <tr style="background-color: #f8d7da;">
+                                        <td style="padding: 12px 0; font-weight: bold; color: #721c24;"><strong>Coût total employeur :</strong></td>
+                                        <td style="text-align: right; padding: 12px 0; font-weight: bold; color: #721c24; font-size: 1.1em;">{total_cout} €</td>
+                                    </tr>
+                                </table>
+                            </div>
+
+                            <p style="margin-top: 30px;">Pour toute question ou modification, merci de nous contacter rapidement.</p>
+
+                            <p style="margin-top: 25px;">Cordialement,<br>
+                            <strong>Service Comptabilité</strong></p>
+
+                            <hr style="border: none; border-top: 1px solid #dee2e6; margin: 30px 0;">
+
+                            <p style="font-size: 11px; color: #6c757d;">
+                                Cet email et ses pièces jointes sont confidentiels et réservés à l'usage exclusif du destinataire.<br>
+                                Si vous n'êtes pas le destinataire prévu, toute divulgation, copie ou distribution est interdite.
+                            </p>
+                        </div>
+                    </div>
+                </body>
+            </html>
+            """
+
+            body_text = """
+            Validation des Bulletins de Paie
+            {company_name} - {month_year}
+
+            Bonjour,
+
+            Veuillez trouver ci-joint les documents de paie pour la période {month_year} à valider avant envoi aux salariés :
+
+            Documents joints :
+            - Bulletins de paie ({employee_count} salariés) - Archive ZIP
+            - Journal de paie - Récapitulatif consolidé
+            - Provision congés payés - État au {month_year}
+
+            RÉCAPITULATIF DE LA PAIE
+            - Nombre de salariés : {employee_count}
+            - Masse salariale brute : {total_brut} €
+            - Charges salariales : {total_charges_sal} €
+            - Charges patronales : {total_charges_pat} €
+            - Masse salariale nette : {total_net} €
+            - Coût total employeur : {total_cout} €
+
+            ⚠️ ACTION REQUISE
+            Merci de vérifier ces documents et de nous confirmer votre validation sous 48h.
+            Après validation, les bulletins seront envoyés automatiquement aux salariés.
+
+            Pour toute question ou modification, merci de nous contacter rapidement.
+
+            Cordialement,
+            Service Comptabilité
+            """
+
+        else:  # English default
+            subject = "Payroll Validation - {company_name} - {month_year}"
+            body_html = """<html>...</html>"""
+            body_text = """..."""
+
         return EmailTemplate(subject=subject, body_html=body_html, body_text=body_text)
 
 
@@ -558,17 +681,155 @@ class EmailDistributionService:
         
         return message
     
+    def send_validation_email(self, client_email: str, company_name: str,
+                             paystubs_buffers: List[Dict], journal_buffer: io.BytesIO,
+                             pto_buffer: io.BytesIO, period: str,
+                             payroll_summary: Dict, test_mode: bool = False) -> Dict:
+        """
+        Envoyer un email de validation au client avec tous les documents de paie
+
+        Args:
+            client_email: Adresse email du client (employeur)
+            company_name: Nom de l'entreprise
+            paystubs_buffers: Liste de dictionnaires {matricule, nom, prenom, buffer}
+            journal_buffer: Buffer PDF du journal de paie
+            pto_buffer: Buffer PDF de la provision CP
+            period: Période (YYYY-MM)
+            payroll_summary: Dictionnaire avec les totaux (brut, net, charges, etc.)
+            test_mode: Mode test (pas d'envoi réel)
+
+        Returns:
+            Dictionnaire avec le statut d'envoi
+        """
+        result = {
+            'success': False,
+            'client_email': client_email,
+            'error': None,
+            'timestamp': datetime.now().isoformat()
+        }
+
+        try:
+            # Vérifier l'adresse email
+            if not client_email:
+                raise ValueError("Adresse email client manquante")
+
+            # Formater la période
+            period_date = datetime.strptime(period, "%Y-%m")
+            month_year = period_date.strftime("%B %Y")
+
+            # Créer le ZIP avec tous les bulletins de paie
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for paystub in paystubs_buffers:
+                    paystub['buffer'].seek(0)
+                    filename = f"bulletin_{paystub.get('matricule')}_{paystub.get('nom')}_{paystub.get('prenom')}_{period}.pdf"
+                    zipf.writestr(filename, paystub['buffer'].read())
+
+            zip_buffer.seek(0)
+            zip_content = zip_buffer.read()
+
+            # Préparer le journal
+            journal_buffer.seek(0)
+            journal_content = journal_buffer.read()
+
+            # Préparer la provision CP
+            pto_buffer.seek(0)
+            pto_content = pto_buffer.read()
+
+            # Préparer les données pour le template
+            template = EmailTemplate.get_client_validation_template("fr")
+            template_data = {
+                'company_name': company_name,
+                'month_year': month_year,
+                'employee_count': len(paystubs_buffers),
+                'total_brut': f"{payroll_summary.get('total_brut', 0):,.2f}".replace(',', ' '),
+                'total_charges_sal': f"{payroll_summary.get('total_charges_sal', 0):,.2f}".replace(',', ' '),
+                'total_charges_pat': f"{payroll_summary.get('total_charges_pat', 0):,.2f}".replace(',', ' '),
+                'total_net': f"{payroll_summary.get('total_net', 0):,.2f}".replace(',', ' '),
+                'total_cout': f"{payroll_summary.get('total_cout', 0):,.2f}".replace(',', ' ')
+            }
+
+            # Formater le sujet et le corps
+            subject = template.subject.format(**template_data)
+            body_html = template.body_html.format(**template_data)
+            body_text = template.body_text.format(**template_data)
+
+            # Préparer les pièces jointes
+            attachments = [
+                (f"bulletins_paie_{period}.zip", zip_content),
+                (f"journal_paie_{period}.pdf", journal_content),
+                (f"provision_cp_{period}.pdf", pto_content)
+            ]
+
+            # Archiver les documents
+            self.archive_manager.archive_document(
+                journal_content,
+                'journal',
+                'company',
+                period,
+                {'client_email': client_email, 'company_name': company_name}
+            )
+
+            self.archive_manager.archive_document(
+                pto_content,
+                'pto_provision',
+                'company',
+                period,
+                {'client_email': client_email, 'company_name': company_name}
+            )
+
+            if test_mode:
+                logger.info(f"[TEST MODE] Email de validation qui serait envoyé à: {client_email}")
+                logger.info(f"[TEST MODE] Pièces jointes: {len(attachments)} fichiers")
+                result['success'] = True
+                result['test_mode'] = True
+                result['attachments_count'] = len(attachments)
+            else:
+                # Créer le message
+                message = self._create_message(
+                    client_email,
+                    subject,
+                    body_html,
+                    body_text,
+                    attachments
+                )
+
+                # Ajouter BCC si configuré
+                if self.config.bcc_archive:
+                    message['Bcc'] = self.config.bcc_archive
+
+                # Envoyer l'email
+                self._send_email(message, client_email)
+
+                result['success'] = True
+                result['attachments_count'] = len(attachments)
+
+            # Logger le succès
+            self.email_log.append(result)
+            logger.info(f"Email de validation envoyé avec succès à: {client_email}")
+
+        except Exception as e:
+            error_msg = str(e)
+            result['error'] = error_msg
+            result['success'] = False
+
+            # Logger l'échec
+            self.email_log.append(result)
+            logger.error(f"Échec envoi email validation à {client_email}: {error_msg}")
+
+        return result
+
     def send_paystub(self, employee_data: Dict, pdf_buffer: io.BytesIO,
                      period: str, test_mode: bool = False) -> Dict:
         """
         Envoyer un bulletin de paie par email
-        
+
         Args:
             employee_data: Données de l'employé
             pdf_buffer: Buffer PDF du bulletin
             period: Période (YYYY-MM)
             test_mode: Mode test (pas d'envoi réel)
-        
+
         Returns:
             Dictionnaire avec le statut d'envoi
         """
