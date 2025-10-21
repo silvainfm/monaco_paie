@@ -61,7 +61,6 @@ class EmailConfig:
         data.pop('sender_password', None)
         return data
 
-
 @dataclass
 class EmailTemplate:
     """Template d'email pour les bulletins de paie"""
@@ -156,7 +155,6 @@ class EmailTemplate:
             body_text = """..."""  # Version anglaise
         
         return EmailTemplate(subject=subject, body_html=body_html, body_text=body_text)
-
 
 class PDFArchiveManager:
     """Gestionnaire d'archives PDF avec versioning"""
@@ -492,7 +490,6 @@ class PDFArchiveManager:
             stats['by_type'][doc_type] += 1
         
         return stats
-
 
 class EmailDistributionService:
     """Service de distribution des emails"""
@@ -887,7 +884,6 @@ class EmailDistributionService:
         
         return df.select(['date', 'time', 'employee_id', 'email', 'status', 'error'])
 
-
 class EmailConfigManager:
     """Gestionnaire de configuration email avec chiffrement des mots de passe"""
     
@@ -1225,7 +1221,6 @@ def create_email_distribution_system(config_path: str = "config/email_config.jso
         'config_manager': config_manager,
         'audit_logger': audit_logger
     }
-
 
 # Exemple d'utilisation
 if __name__ == "__main__":
