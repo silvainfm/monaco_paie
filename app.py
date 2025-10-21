@@ -787,26 +787,29 @@ def validation_page():
     if filtered_df.is_empty():
         st.info("Aucun employé trouvé avec ces critères")
         return
-    
-    for row in filtered_df.iter_rows(named=True):
-        matricule = row.get('matricule', '')
+
+    for row_idx, row in enumerate(filtered_df.iter_rows(named=True)):
+        matricule = row.get('matricule', '') or ''
         is_edge_case = row.get('edge_case_flag', False)
         is_validated = row.get('statut_validation', False) == True
 
         # Expander title with status indicator
         status_icon = "⚠️" if is_edge_case else ("✅" if is_validated else "⏳")
         title = f"{status_icon} {row.get('nom', '')} {row.get('prenom', '')} - {matricule}"
-        
+
+        # Use unique key combining row index and matricule
+        unique_key = f"{row_idx}_{matricule}"
+
         with st.expander(title, expanded=is_edge_case):
             # Initialize edit mode state
-            edit_key = f"edit_mode_{matricule}"
+            edit_key = f"edit_mode_{unique_key}"
             if edit_key not in st.session_state:
                 st.session_state[edit_key] = False
-            
+
             # Show issues if any
             if is_edge_case:
                 st.warning(f"**Raison:** {row.get('edge_case_reason', 'Non spécifiée')}")
-            
+
             # Summary row
             col1, col2, col3, col4 = st.columns(4)
             with col1:
@@ -817,23 +820,23 @@ def validation_page():
                 st.metric("Salaire net", f"{row.get('salaire_net', 0):,.2f} €")
             with col4:
                 st.metric("Coût employeur", f"{row.get('cout_total_employeur', 0):,.2f} €")
-            
+
             st.markdown("---")
-            
+
             # Toggle edit mode
             col1, col2, col3 = st.columns([1, 1, 2])
             with col1:
-                if st.button("✏️ Modifier" if not st.session_state[edit_key] else "❌ Annuler", 
-                           key=f"toggle_edit_{matricule}"):
+                if st.button("✏️ Modifier" if not st.session_state[edit_key] else "❌ Annuler",
+                           key=f"toggle_edit_{unique_key}"):
                     st.session_state[edit_key] = not st.session_state[edit_key]
                     st.rerun()
             
             # EDIT MODE
             if st.session_state[edit_key]:
                 st.subheader("📝 Mode Édition")
-                
+
                 # Initialize modifications storage
-                mod_key = f"modifications_{matricule}"
+                mod_key = f"modifications_{unique_key}"
                 if mod_key not in st.session_state:
                     st.session_state[mod_key] = {}
                 
@@ -861,7 +864,7 @@ def validation_page():
                                     value=float(current_value),
                                     step=0.5,
                                     format="%.2f",
-                                    key=f"sal_{matricule}_{field}",
+                                    key=f"sal_{unique_key}_{field}",
                                     label_visibility="collapsed"
                                 )
                             else:
@@ -870,7 +873,7 @@ def validation_page():
                                     value=float(current_value),
                                     step=10.0,
                                     format="%.2f",
-                                    key=f"sal_{matricule}_{field}",
+                                    key=f"sal_{unique_key}_{field}",
                                     label_visibility="collapsed"
                                 )
                         
@@ -882,7 +885,7 @@ def validation_page():
                                 st.markdown(f"`{current_value:.2f}`")
 
                     # Initialize additional rubrics storage
-                    additional_rubrics_key = f"additional_rubrics_{matricule}"
+                    additional_rubrics_key = f"additional_rubrics_{unique_key}"
                     if additional_rubrics_key not in st.session_state:
                         st.session_state[additional_rubrics_key] = []
 
@@ -902,7 +905,7 @@ def validation_page():
                                     value=float(current_value),
                                     step=0.5,
                                     format="%.2f",
-                                    key=f"sal_{matricule}_{field}",
+                                    key=f"sal_{unique_key}_{field}",
                                     label_visibility="collapsed"
                                 )
                             else:
@@ -911,7 +914,7 @@ def validation_page():
                                     value=float(current_value),
                                     step=10.0,
                                     format="%.2f",
-                                    key=f"sal_{matricule}_{field}",
+                                    key=f"sal_{unique_key}_{field}",
                                     label_visibility="collapsed"
                                 )
 
@@ -938,7 +941,7 @@ def validation_page():
                         selected = st.selectbox(
                             "Rubrique à ajouter",
                             options=rubric_options,
-                            key=f"add_rubric_{matricule}",
+                            key=f"add_rubric_{unique_key}",
                             label_visibility="collapsed"
                         )
 
@@ -979,7 +982,7 @@ def validation_page():
                     base_t2 = max(0, min(salaire_brut - 3428, 13712 - 3428)) if salaire_brut > 3428 else 0
                     
                     # Initialize bases storage
-                    bases_key = f"charge_bases_{matricule}"
+                    bases_key = f"charge_bases_{unique_key}"
                     if bases_key not in st.session_state:
                         st.session_state[bases_key] = {}
                     
@@ -1126,7 +1129,7 @@ def validation_page():
                                 value=float(current_sal),
                                 step=1.0,
                                 format="%.2f",
-                                key=f"charge_sal_{matricule}_{charge['code']}",
+                                key=f"charge_sal_{unique_key}_{charge['code']}",
                                 label_visibility="collapsed"
                             )
                             if abs(new_sal - current_sal) > 0.01:
@@ -1142,7 +1145,7 @@ def validation_page():
                             value=float(current_base),
                             step=100.0,
                             format="%.2f",
-                            key=f"charge_base_{matricule}_{charge['code']}",
+                            key=f"charge_base_{unique_key}_{charge['code']}",
                             label_visibility="collapsed"
                         )
                         if abs(new_base - charge['base_default']) > 0.01:
@@ -1165,7 +1168,7 @@ def validation_page():
                                 value=float(current_pat),
                                 step=1.0,
                                 format="%.2f",
-                                key=f"charge_pat_{matricule}_{charge['code']}",
+                                key=f"charge_pat_{unique_key}_{charge['code']}",
                                 label_visibility="collapsed"
                             )
                             if abs(new_pat - current_pat) > 0.01:
@@ -1200,7 +1203,7 @@ def validation_page():
                     total_cols[5].markdown(f"**{total_pat:.2f}€**")
 
                     # Initialize additional charges storage
-                    additional_charges_key = f"additional_charges_{matricule}"
+                    additional_charges_key = f"additional_charges_{unique_key}"
                     if additional_charges_key not in st.session_state:
                         st.session_state[additional_charges_key] = []
 
@@ -1236,7 +1239,7 @@ def validation_page():
                                 value=float(current_sal),
                                 step=1.0,
                                 format="%.2f",
-                                key=f"charge_sal_{matricule}_{added_charge['code']}",
+                                key=f"charge_sal_{unique_key}_{added_charge['code']}",
                                 label_visibility="collapsed"
                             )
                             if abs(new_sal - current_sal) > 0.01:
@@ -1252,7 +1255,7 @@ def validation_page():
                             value=float(current_base),
                             step=100.0,
                             format="%.2f",
-                            key=f"charge_base_{matricule}_{added_charge['code']}",
+                            key=f"charge_base_{unique_key}_{added_charge['code']}",
                             label_visibility="collapsed"
                         )
                         if abs(new_base - current_base) > 0.01:
@@ -1274,7 +1277,7 @@ def validation_page():
                                 value=float(current_pat),
                                 step=1.0,
                                 format="%.2f",
-                                key=f"charge_pat_{matricule}_{added_charge['code']}",
+                                key=f"charge_pat_{unique_key}_{added_charge['code']}",
                                 label_visibility="collapsed"
                             )
                             if abs(new_pat - current_pat) > 0.01:
@@ -1300,7 +1303,7 @@ def validation_page():
                         selected_charge = st.selectbox(
                             "Cotisation à ajouter",
                             options=charge_options,
-                            key=f"add_charge_{matricule}",
+                            key=f"add_charge_{unique_key}",
                             label_visibility="collapsed"
                         )
 
@@ -1337,7 +1340,7 @@ def validation_page():
                 col1, col2, col3 = st.columns([2, 2, 3])
                 
                 with col1:
-                    if st.button("🔄 Recalculer", key=f"recalc_{matricule}", type="primary"):
+                    if st.button("🔄 Recalculer", key=f"recalc_{unique_key}", type="primary"):
                         if st.session_state[mod_key]:
                             try:
                                 # Recalculate with modifications
@@ -1362,8 +1365,8 @@ def validation_page():
                             st.warning("Aucune modification à appliquer")
                 
                 with col2:
-                    reason = st.text_input("Motif de modification", key=f"reason_{matricule}")
-                    if st.button("💾 Sauvegarder", key=f"save_{matricule}"):
+                    reason = st.text_input("Motif de modification", key=f"reason_{unique_key}")
+                    if st.button("💾 Sauvegarder", key=f"save_{unique_key}"):
                         if not reason:
                             st.error("Le motif est obligatoire")
                         elif not st.session_state[mod_key]:
@@ -1406,7 +1409,7 @@ def validation_page():
                 col1, col2 = st.columns([1, 3])
                 with col1:
                     if not is_validated:
-                        if st.button("✅ Valider", key=f"validate_{matricule}", type="primary"):
+                        if st.button("✅ Valider", key=f"validate_{unique_key}", type="primary"):
                             # Update using Polars
                             row_idx = df.filter(pl.col('matricule') == matricule).select(pl.first()).to_dicts()[0]
                             
