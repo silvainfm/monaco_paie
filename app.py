@@ -84,6 +84,7 @@ from services.payslip_helpers import (
     clean_employee_data_for_pdf,
     safe_get_charge_value,
     safe_get_numeric,
+    audit_log_page,
     _show_read_only_validation
 )
 
