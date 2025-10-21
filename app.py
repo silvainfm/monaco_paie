@@ -1441,7 +1441,7 @@ def validation_page():
                             try:
                                 # Recalculate with modifications
                                 updated = recalculate_employee_payslip(
-                                    row.to_dict(), 
+                                    dict(row),
                                     st.session_state[mod_key]
                                 )
                                 
@@ -1682,8 +1682,8 @@ def pdf_generation_page():
                         cleaned_data = []
                         for row in df_copy.iter_rows(named=True):
                             cleaned_data.append(clean_employee_data_for_pdf(row))
-                        df_pandas = pl.DataFrame(cleaned_data).to_pandas()
-                        documents = pdf_service.generate_monthly_documents(df_pandas, f"{month:02d}-{year}")
+                        df_cleaned = pl.DataFrame(cleaned_data)
+                        documents = pdf_service.generate_monthly_documents(df_cleaned, f"{month:02d}-{year}")
                         
                         if 'paystubs' in documents:
                             # Create a zip file with all paystubs
@@ -1741,9 +1741,9 @@ def pdf_generation_page():
             if st.button("📊 Générer journal de paie", type="primary", use_container_width=True):
                 try:
                     with st.spinner("Génération du journal en cours..."):
-                        employees_data = df.to_dict('records')
+                        employees_data = df.to_dicts()
                         journal_buffer = pdf_service.journal_generator.generate_pay_journal(
-                            employees_data, 
+                            employees_data,
                             f"{month:02d}-{year}"
                         )
                     
