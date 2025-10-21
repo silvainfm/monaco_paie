@@ -187,11 +187,16 @@ class DataManager:
 
         conn = DataManager.get_connection()
 
-        result = conn.execute("""
-            SELECT * FROM payroll_data
-            WHERE company_id = ? AND period_year = ? AND period_month = ?
-            ORDER BY matricule
-        """, [company_id, year, month]).pl()
+        try:
+            result = conn.execute("""
+                SELECT * FROM payroll_data
+                WHERE company_id = ? AND period_year = ? AND period_month = ?
+                ORDER BY matricule
+            """, [company_id, year, month]).pl()
+        except Exception as e:
+            # Handle parquet errors or empty results
+            logger.warning(f"Error loading period data: {e}")
+            return DataManager.create_empty_df()
 
         if result.height == 0:
             return DataManager.create_empty_df()
@@ -204,50 +209,62 @@ class DataManager:
                 # Check if column is string (JSON) type
                 if result[col].dtype == pl.Utf8:
                     # Parse JSON strings back to Python dicts
-                    result = result.with_columns(
-                        pl.col(col).map_elements(
-                            lambda x: json.loads(x) if x is not None and x != '' else None,
-                            return_dtype=pl.Object
-                        ).alias(col)
-                    )
+                    try:
+                        result = result.with_columns(
+                            pl.col(col).map_elements(
+                                lambda x: json.loads(x) if x is not None and x != '' else None,
+                                return_dtype=pl.Object
+                            ).alias(col)
+                        )
+                    except Exception as e:
+                        logger.warning(f"Error parsing JSON column {col}: {e}")
+                        # Leave column as-is if parsing fails
 
         return result
     
     @staticmethod
-    def get_employee_history(company_id: str, matricule: str, 
+    def get_employee_history(company_id: str, matricule: str,
                             start_year: int, start_month: int,
                             end_year: int, end_month: int) -> pl.DataFrame:
         """Get employee history across periods (historical analysis)"""
         conn = DataManager.get_connection()
-        
-        result = conn.execute("""
-            SELECT * FROM payroll_data
-            WHERE company_id = ?
-                AND matricule = ?
-                AND (period_year > ? OR (period_year = ? AND period_month >= ?))
-                AND (period_year < ? OR (period_year = ? AND period_month <= ?))
-            ORDER BY period_year, period_month
-        """, [company_id, matricule, start_year, start_year, start_month, 
-              end_year, end_year, end_month]).pl()
-        
+
+        try:
+            result = conn.execute("""
+                SELECT * FROM payroll_data
+                WHERE company_id = ?
+                    AND matricule = ?
+                    AND (period_year > ? OR (period_year = ? AND period_month >= ?))
+                    AND (period_year < ? OR (period_year = ? AND period_month <= ?))
+                ORDER BY period_year, period_month
+            """, [company_id, matricule, start_year, start_year, start_month,
+                  end_year, end_year, end_month]).pl()
+        except Exception as e:
+            logger.warning(f"Error loading employee history: {e}")
+            return DataManager.create_empty_df()
+
         return result
     
     @staticmethod
-    def get_period_range(company_id: str, 
+    def get_period_range(company_id: str,
                         start_year: int, start_month: int,
                         end_year: int, end_month: int) -> pl.DataFrame:
         """Get all payroll data for period range (cross-period aggregation)"""
         conn = DataManager.get_connection()
-        
-        result = conn.execute("""
-            SELECT * FROM payroll_data
-            WHERE company_id = ?
-                AND (period_year > ? OR (period_year = ? AND period_month >= ?))
-                AND (period_year < ? OR (period_year = ? AND period_month <= ?))
-            ORDER BY period_year, period_month, matricule
-        """, [company_id, start_year, start_year, start_month, 
-              end_year, end_year, end_month]).pl()
-        
+
+        try:
+            result = conn.execute("""
+                SELECT * FROM payroll_data
+                WHERE company_id = ?
+                    AND (period_year > ? OR (period_year = ? AND period_month >= ?))
+                    AND (period_year < ? OR (period_year = ? AND period_month <= ?))
+                ORDER BY period_year, period_month, matricule
+            """, [company_id, start_year, start_year, start_month,
+                  end_year, end_year, end_month]).pl()
+        except Exception as e:
+            logger.warning(f"Error loading period range: {e}")
+            return DataManager.create_empty_df()
+
         return result
     
     @staticmethod
@@ -287,25 +304,32 @@ class DataManager:
     def get_available_periods(company_id: str) -> List[Dict]:
         """Get list of available periods for a company"""
         conn = DataManager.get_connection()
-        
-        result = conn.execute("""
-            SELECT DISTINCT period_year, period_month,
-                   COUNT(*) as employee_count,
-                   MAX(last_modified) as last_modified
-            FROM payroll_data
-            WHERE company_id = ?
-            GROUP BY period_year, period_month
-            ORDER BY period_year DESC, period_month DESC
-        """, [company_id]).pl()
-        
-        return result.to_dicts()
-    
+
+        try:
+            result = conn.execute("""
+                SELECT DISTINCT period_year, period_month,
+                       COUNT(*) as employee_count,
+                       MAX(last_modified) as last_modified
+                FROM payroll_data
+                WHERE company_id = ?
+                GROUP BY period_year, period_month
+                ORDER BY period_year DESC, period_month DESC
+            """, [company_id]).pl()
+            return result.to_dicts()
+        except Exception as e:
+            logger.warning(f"Error loading available periods: {e}")
+            return []
+
     @staticmethod
     def get_companies_list() -> List[Dict]:
         """Get list of companies"""
         conn = DataManager.get_connection()
-        result = conn.execute("SELECT * FROM companies ORDER BY name").pl()
-        return result.to_dicts()
+        try:
+            result = conn.execute("SELECT * FROM companies ORDER BY name").pl()
+            return result.to_dicts()
+        except Exception as e:
+            logger.warning(f"Error loading companies list: {e}")
+            return []
     
     @staticmethod
     def get_company_creation_date(company_id: str) -> Optional[datetime]:
@@ -479,35 +503,47 @@ class DataAuditLogger:
     def get_recent_logs(limit: int = 100) -> pl.DataFrame:
         """Get recent audit logs"""
         conn = DataManager.get_connection()
-        result = conn.execute("""
-            SELECT * FROM audit_log
-            ORDER BY timestamp DESC
-            LIMIT ?
-        """, [limit]).pl()
-        return result
-    
+        try:
+            result = conn.execute("""
+                SELECT * FROM audit_log
+                ORDER BY timestamp DESC
+                LIMIT ?
+            """, [limit]).pl()
+            return result
+        except Exception as e:
+            logger.warning(f"Error loading recent logs: {e}")
+            return pl.DataFrame()
+
     @staticmethod
     def get_period_logs(company_id: str, year: int, month: int) -> pl.DataFrame:
         """Get logs for specific period"""
         conn = DataManager.get_connection()
-        result = conn.execute("""
-            SELECT * FROM audit_log
-            WHERE company_id = ? AND period_year = ? AND period_month = ?
-            ORDER BY timestamp DESC
-        """, [company_id, year, month]).pl()
-        return result
-    
+        try:
+            result = conn.execute("""
+                SELECT * FROM audit_log
+                WHERE company_id = ? AND period_year = ? AND period_month = ?
+                ORDER BY timestamp DESC
+            """, [company_id, year, month]).pl()
+            return result
+        except Exception as e:
+            logger.warning(f"Error loading period logs: {e}")
+            return pl.DataFrame()
+
     @staticmethod
     def get_user_activity(user: str, days: int = 30) -> pl.DataFrame:
         """Get user activity for last N days"""
         conn = DataManager.get_connection()
-        result = conn.execute("""
-            SELECT * FROM audit_log
-            WHERE user = ? 
-                AND timestamp >= CURRENT_TIMESTAMP - INTERVAL ? DAY
-            ORDER BY timestamp DESC
-        """, [user, days]).pl()
-        return result
+        try:
+            result = conn.execute("""
+                SELECT * FROM audit_log
+                WHERE user = ?
+                    AND timestamp >= CURRENT_TIMESTAMP - INTERVAL ? DAY
+                ORDER BY timestamp DESC
+            """, [user, days]).pl()
+            return result
+        except Exception as e:
+            logger.warning(f"Error loading user activity: {e}")
+            return pl.DataFrame()
 
 # Backward compatibility alias
 DataConsolidation = DataManager
