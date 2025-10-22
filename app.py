@@ -413,7 +413,6 @@ def main_app():
         }
 
         if st.session_state.role == "admin":
-            pages["⚙️ Configuration Email"] = "email_config"
             pages["⚙️ Configuration"] = "config"
             pages["📋 Journal modifications"] = "audit_log"
         
@@ -453,8 +452,6 @@ def main_app():
         send_validation_email_page()
     elif current_page == "export":
         export_page()
-    elif current_page == "email_config":
-        email_config_page()
     elif current_page == "config":
         config_page()
     elif current_page == "audit_log":
@@ -2409,7 +2406,7 @@ def dsm_declaration_page():
                 st.code(traceback.format_exc())
 
 # ============================================================================
-# ADMIN USER MANAGEMENT
+# ADMIN PAGES
 # ============================================================================
 def admin_panel():
     if st.session_state.get("role") != "admin":
@@ -2477,7 +2474,7 @@ def config_page():
     
     system = st.session_state.payroll_system
 
-    tab1, tab2, tab3 = st.tabs(["Entreprise", "Utilisateurs", "Admin"])
+    tab1, tab2, tab3, tab4= st.tabs(["Entreprise", "Utilisateurs", "Admin", "Configuration Emails"])
 
     with tab1:
         st.subheader("Informations de l'entreprise")
@@ -2536,169 +2533,164 @@ def config_page():
             st.metric("Comptables", stats.get('comptable_users', 0))
 
     with tab3:
-        # Include the full admin panel in the configuration
-        st.info("ℹ️ Les paramètres de calcul (plafonds SS, SMIC, taux de cotisations) sont désormais gérés dans le fichier CSV: config/payroll_rates.csv")
         admin_panel()
+    
+    with tab4:
+        config_manager = EmailConfigManager(Path("config/email_config.json"))
 
-def email_config_page():
-    """Page de configuration des emails"""
-    st.title("⚙️ Configuration Email")
+        # Charger la configuration existante
+        existing_config = config_manager.load_config()
 
-    config_manager = EmailConfigManager(Path("config/email_config.json"))
+        st.info("Configurez les paramètres SMTP pour l'envoi des emails de paie")
 
-    # Charger la configuration existante
-    existing_config = config_manager.load_config()
-
-    st.info("Configurez les paramètres SMTP pour l'envoi des emails de paie")
-
-    # Preset providers
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        provider = st.selectbox(
-            "Fournisseur email",
-            ["Gmail", "Outlook", "Office 365", "Autre (personnalisé)"]
-        )
-
-    # Default configs based on provider
-    defaults = {
-        "Gmail": {"server": "smtp.gmail.com", "port": 587, "use_tls": True, "use_ssl": False},
-        "Outlook": {"server": "smtp-mail.outlook.com", "port": 587, "use_tls": True, "use_ssl": False},
-        "Office 365": {"server": "smtp.office365.com", "port": 587, "use_tls": True, "use_ssl": False},
-        "Autre (personnalisé)": {"server": "", "port": 587, "use_tls": True, "use_ssl": False}
-    }
-
-    preset = defaults.get(provider, defaults["Autre (personnalisé)"])
-
-    st.markdown("---")
-
-    with st.form("email_config_form"):
-        col1, col2 = st.columns(2)
-
+        # Preset providers
+        col1, col2 = st.columns([2, 1])
         with col1:
-            smtp_server = st.text_input(
-                "Serveur SMTP",
-                value=existing_config.smtp_server if existing_config else preset["server"],
-                help="ex: smtp.gmail.com"
+            provider = st.selectbox(
+                "Fournisseur email",
+                ["Gmail", "Outlook", "Office 365", "Autre (personnalisé)"]
             )
 
-            smtp_port = st.number_input(
-                "Port SMTP",
-                value=existing_config.smtp_port if existing_config else preset["port"],
-                min_value=1,
-                max_value=65535
-            )
+        # Default configs based on provider
+        defaults = {
+            "Gmail": {"server": "smtp.gmail.com", "port": 587, "use_tls": True, "use_ssl": False},
+            "Outlook": {"server": "smtp-mail.outlook.com", "port": 587, "use_tls": True, "use_ssl": False},
+            "Office 365": {"server": "smtp.office365.com", "port": 587, "use_tls": True, "use_ssl": False},
+            "Autre (personnalisé)": {"server": "", "port": 587, "use_tls": True, "use_ssl": False}
+        }
 
-            sender_email = st.text_input(
-                "Adresse email expéditeur",
-                value=existing_config.sender_email if existing_config else "",
-                help="ex: paie@monentreprise.com"
-            )
+        preset = defaults.get(provider, defaults["Autre (personnalisé)"])
 
-            sender_password = st.text_input(
-                "Mot de passe / App Password",
-                type="password",
-                help="Pour Gmail/Outlook, utilisez un 'App Password' généré"
-            )
-
-        with col2:
-            sender_name = st.text_input(
-                "Nom de l'expéditeur",
-                value=existing_config.sender_name if existing_config else "Service Paie",
-                help="Nom affiché dans les emails"
-            )
-
-            use_tls = st.checkbox(
-                "Utiliser TLS (StartTLS)",
-                value=existing_config.use_tls if existing_config else preset["use_tls"]
-            )
-
-            use_ssl = st.checkbox(
-                "Utiliser SSL",
-                value=existing_config.use_ssl if existing_config else preset["use_ssl"]
-            )
-
-            reply_to = st.text_input(
-                "Adresse de réponse (optionnel)",
-                value=existing_config.reply_to if existing_config and existing_config.reply_to else ""
-            )
-
-            bcc_archive = st.text_input(
-                "BCC pour archivage (optionnel)",
-                value=existing_config.bcc_archive if existing_config and existing_config.bcc_archive else "",
-                help="Copie cachée pour archivage automatique"
-            )
-
-        col1, col2, col3 = st.columns([1, 1, 2])
-
-        with col1:
-            save_button = st.form_submit_button("💾 Sauvegarder", use_container_width=True)
-
-        with col2:
-            test_button = st.form_submit_button("🧪 Tester", use_container_width=True)
-
-    if save_button:
-        try:
-            # Créer la configuration
-            config = EmailConfig(
-                smtp_server=smtp_server,
-                smtp_port=smtp_port,
-                sender_email=sender_email,
-                sender_password=sender_password or (existing_config.sender_password if existing_config else ""),
-                sender_name=sender_name,
-                use_tls=use_tls,
-                use_ssl=use_ssl,
-                reply_to=reply_to if reply_to else None,
-                bcc_archive=bcc_archive if bcc_archive else None
-            )
-
-            # Sauvegarder
-            if config_manager.save_config(config, encrypt_password=True):
-                st.success("✅ Configuration sauvegardée avec succès!")
-                time.sleep(1)
-                st.rerun()
-            else:
-                st.error("❌ Erreur lors de la sauvegarde")
-
-        except Exception as e:
-            st.error(f"❌ Erreur: {str(e)}")
-
-    if test_button:
-        try:
-            import smtplib
-            import ssl
-
-            # Tester la connexion SMTP
-            context = ssl.create_default_context()
-
-            with st.spinner("Test de connexion SMTP..."):
-                if use_ssl:
-                    server = smtplib.SMTP_SSL(smtp_server, smtp_port, context=context)
-                else:
-                    server = smtplib.SMTP(smtp_server, smtp_port)
-                    if use_tls:
-                        server.starttls(context=context)
-
-                server.login(sender_email, sender_password or (existing_config.sender_password if existing_config else ""))
-                server.quit()
-
-            st.success("✅ Connexion SMTP réussie!")
-
-        except Exception as e:
-            st.error(f"❌ Échec du test: {str(e)}")
-
-    # Afficher la config actuelle
-    if existing_config:
         st.markdown("---")
-        st.subheader("Configuration actuelle")
 
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Serveur SMTP", f"{existing_config.smtp_server}:{existing_config.smtp_port}")
-            st.metric("Expéditeur", existing_config.sender_email)
+        with st.form("email_config_form"):
+            col1, col2 = st.columns(2)
 
-        with col2:
-            st.metric("TLS/SSL", f"TLS: {existing_config.use_tls} | SSL: {existing_config.use_ssl}")
-            st.metric("Nom affiché", existing_config.sender_name)
+            with col1:
+                smtp_server = st.text_input(
+                    "Serveur SMTP",
+                    value=existing_config.smtp_server if existing_config else preset["server"],
+                    help="ex: smtp.gmail.com"
+                )
+
+                smtp_port = st.number_input(
+                    "Port SMTP",
+                    value=existing_config.smtp_port if existing_config else preset["port"],
+                    min_value=1,
+                    max_value=65535
+                )
+
+                sender_email = st.text_input(
+                    "Adresse email expéditeur",
+                    value=existing_config.sender_email if existing_config else "",
+                    help="ex: paie@monentreprise.com"
+                )
+
+                sender_password = st.text_input(
+                    "Mot de passe / App Password",
+                    type="password",
+                    help="Pour Gmail/Outlook, utilisez un 'App Password' généré"
+                )
+
+            with col2:
+                sender_name = st.text_input(
+                    "Nom de l'expéditeur",
+                    value=existing_config.sender_name if existing_config else "Service Paie",
+                    help="Nom affiché dans les emails"
+                )
+
+                use_tls = st.checkbox(
+                    "Utiliser TLS (StartTLS)",
+                    value=existing_config.use_tls if existing_config else preset["use_tls"]
+                )
+
+                use_ssl = st.checkbox(
+                    "Utiliser SSL",
+                    value=existing_config.use_ssl if existing_config else preset["use_ssl"]
+                )
+
+                reply_to = st.text_input(
+                    "Adresse de réponse (optionnel)",
+                    value=existing_config.reply_to if existing_config and existing_config.reply_to else ""
+                )
+
+                bcc_archive = st.text_input(
+                    "BCC pour archivage (optionnel)",
+                    value=existing_config.bcc_archive if existing_config and existing_config.bcc_archive else "",
+                    help="Copie cachée pour archivage automatique"
+                )
+
+            col1, col2, col3 = st.columns([1, 1, 2])
+
+            with col1:
+                save_button = st.form_submit_button("💾 Sauvegarder", use_container_width=True)
+
+            with col2:
+                test_button = st.form_submit_button("🧪 Tester", use_container_width=True)
+
+        if save_button:
+            try:
+                # Créer la configuration
+                config = EmailConfig(
+                    smtp_server=smtp_server,
+                    smtp_port=smtp_port,
+                    sender_email=sender_email,
+                    sender_password=sender_password or (existing_config.sender_password if existing_config else ""),
+                    sender_name=sender_name,
+                    use_tls=use_tls,
+                    use_ssl=use_ssl,
+                    reply_to=reply_to if reply_to else None,
+                    bcc_archive=bcc_archive if bcc_archive else None
+                )
+
+                # Sauvegarder
+                if config_manager.save_config(config, encrypt_password=True):
+                    st.success("✅ Configuration sauvegardée avec succès!")
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error("❌ Erreur lors de la sauvegarde")
+
+            except Exception as e:
+                st.error(f"❌ Erreur: {str(e)}")
+
+        if test_button:
+            try:
+                import smtplib
+                import ssl
+
+                # Tester la connexion SMTP
+                context = ssl.create_default_context()
+
+                with st.spinner("Test de connexion SMTP..."):
+                    if use_ssl:
+                        server = smtplib.SMTP_SSL(smtp_server, smtp_port, context=context)
+                    else:
+                        server = smtplib.SMTP(smtp_server, smtp_port)
+                        if use_tls:
+                            server.starttls(context=context)
+
+                    server.login(sender_email, sender_password or (existing_config.sender_password if existing_config else ""))
+                    server.quit()
+
+                st.success("✅ Connexion SMTP réussie!")
+
+            except Exception as e:
+                st.error(f"❌ Échec du test: {str(e)}")
+
+        # Afficher la config actuelle
+        if existing_config:
+            st.markdown("---")
+            st.subheader("Configuration actuelle")
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Serveur SMTP", f"{existing_config.smtp_server}:{existing_config.smtp_port}")
+                st.metric("Expéditeur", existing_config.sender_email)
+
+            with col2:
+                st.metric("TLS/SSL", f"TLS: {existing_config.use_tls} | SSL: {existing_config.use_ssl}")
+                st.metric("Nom affiché", existing_config.sender_name)
 
 # ============================================================================
 # MAIN EXECUTION
