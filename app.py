@@ -970,7 +970,9 @@ def validation_page():
 
         # Expander title with status indicator
         status_icon = "⚠️" if is_edge_case else ("✅" if is_validated else "⏳")
-        title = f"{status_icon} {row.get('nom', '')} {row.get('prenom', '')} - {matricule}"
+        nom = row.get('nom') or ''
+        prenom = row.get('prenom') or ''
+        title = f"{status_icon} {nom} {prenom} - {matricule}"
 
         # Use unique key combining row index and matricule
         unique_key = f"{row_idx}_{matricule}"
@@ -1612,8 +1614,10 @@ def validation_page():
                             st.session_state.payroll_system.data_consolidator.save_period_data(
                                 df, st.session_state.current_company, month, year
                             )
-                            
-                            st.success(f"✅ Fiche validée pour {row.get('nom', '')} {row.get('prenom', '')}")
+
+                            nom = row.get('nom') or ''
+                            prenom = row.get('prenom') or ''
+                            st.success(f"✅ Fiche validée pour {nom} {prenom}")
                             st.rerun()
                     else:
                         st.success("✅ Déjà validé")
@@ -1669,7 +1673,7 @@ def pdf_generation_page():
         
         # Employee selection
         employees = df.select(['matricule', 'nom', 'prenom']).to_dicts()
-        employee_options = [f"{emp['matricule']} - {emp['nom']} {emp['prenom']}" for emp in employees]
+        employee_options = [f"{emp.get('matricule', '')} - {emp.get('nom') or ''} {emp.get('prenom') or ''}" for emp in employees]
         
         selected_employee = st.selectbox("Sélectionner un employé", employee_options)
         
@@ -1769,7 +1773,10 @@ def pdf_generation_page():
                             zip_buffer = io.BytesIO()
                             with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
                                 for paystub in documents['paystubs']:
-                                    filename = f"bulletin_{paystub['matricule']}_{paystub['nom']}_{paystub['prenom']}.pdf"
+                                    mat = paystub.get('matricule', '')
+                                    nom = paystub.get('nom') or ''
+                                    prenom = paystub.get('prenom') or ''
+                                    filename = f"bulletin_{mat}_{nom}_{prenom}.pdf"
                                     zip_file.writestr(filename, paystub['buffer'].getvalue())
                             
                             # Store in session state

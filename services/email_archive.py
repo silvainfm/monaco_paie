@@ -719,7 +719,10 @@ class EmailDistributionService:
             with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 for paystub in paystubs_buffers:
                     paystub['buffer'].seek(0)
-                    filename = f"bulletin_{paystub.get('matricule')}_{paystub.get('nom')}_{paystub.get('prenom')}_{period}.pdf"
+                    mat = paystub.get('matricule', '')
+                    nom = paystub.get('nom') or ''
+                    prenom = paystub.get('prenom') or ''
+                    filename = f"bulletin_{mat}_{nom}_{prenom}_{period}.pdf"
                     zipf.writestr(filename, paystub['buffer'].read())
 
             zip_buffer.seek(0)
@@ -875,12 +878,14 @@ class EmailDistributionService:
             filename = f"bulletin_{employee_data.get('matricule')}_{period}.pdf"
             
             # Archiver le document avant envoi
+            nom = employee_data.get('nom') or ''
+            prenom = employee_data.get('prenom') or ''
             archive_result = self.archive_manager.archive_document(
                 pdf_content,
                 'paystub',
                 employee_data.get('matricule'),
                 period,
-                {'email': to_email, 'employee_name': f"{employee_data.get('nom')} {employee_data.get('prenom')}"}
+                {'email': to_email, 'employee_name': f"{nom} {prenom}"}
             )
             
             if test_mode:

@@ -452,12 +452,14 @@ def _show_read_only_validation():
         return
 
     for row in filtered_df.iter_rows(named=True):
-        matricule = row.get('matricule', '')
+        matricule = row.get('matricule', '') or ''
         is_edge_case = row.get('edge_case_flag', False)
         is_validated = row.get('statut_validation', False) == True
 
         status_icon = "⚠️" if is_edge_case else ("✅" if is_validated else "⏳")
-        title = f"{status_icon} {row.get('nom', '')} {row.get('prenom', '')} - {matricule} [LECTURE SEULE]"
+        nom = row.get('nom') or ''
+        prenom = row.get('prenom') or ''
+        title = f"{status_icon} {nom} {prenom} - {matricule} [LECTURE SEULE]"
 
         with st.expander(title):
             # Show issues if any
