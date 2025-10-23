@@ -1,6 +1,11 @@
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+- In all interactions adn commit messages, be extremely concise ans sacrifice grammar for the sake of concision.
+- When suggesting code changes, only suggest code that is necessary to achieve the requested change and that will drastically improve the codebase and/or project.
+
+## Plan
+- at the end of each plan, give me a list of unresolved questions to answer if any. Make the questions extremely concise. Sacrifice grammar for the sake of concision.
 
 ## Project Overview
 
@@ -8,39 +13,6 @@ Monaco Payroll System - A comprehensive payroll management application for Monac
 
 **Target Users**: 30-person accounting firm managing payroll for companies and individuals in Monaco.
 
-## Development Commands
-
-### Environment Setup
-```bash
-# Activate virtual environment
-source .venv/bin/activate
-
-# Install dependencies (uv is used for package management)
-uv pip install -e .
-
-# Or use requirements.txt
-pip install -r requirements.txt
-```
-
-### Running the Application
-```bash
-# Start Streamlit app
-streamlit run app.py
-
-# App runs on http://localhost:8501
-```
-
-### Code Quality
-```bash
-# Format code with Black (line length: 100)
-black services/ app.py
-
-# Lint with Ruff
-ruff check services/ app.py
-
-# Run tests (when implemented)
-pytest
-```
 
 ### Database Operations
 The DuckDB database is located at `data/payroll.duckdb`. No migrations needed - schema is auto-created by `DataManager` on first run.
@@ -187,50 +159,6 @@ Save to DuckDB → Generate PDFs → Send Emails → DSM XML
 3. Update `EdgeCaseAgent.process()` logic for auto-correction rules
 4. Adjust confidence thresholds (default: >0.85 for auto-correction)
 
-### Testing a Payroll Calculation
-```python
-# In Streamlit or Python console
-from services.payroll_calculations import CalculateurPaieMonaco, MonacoPayrollConstants
-
-# Load constants for year
-constants = MonacoPayrollConstants(year=2025)
-
-# Create calculator
-calc = CalculateurPaieMonaco(constants)
-
-# Test employee data (dict)
-employee = {
-    'matricule': '001',
-    'nom': 'TEST',
-    'salaire_base': 3000.00,
-    'base_heures': 169,
-    # ... other required fields
-}
-
-# Process payslip
-result = calc.process_employee_payslip(employee)
-print(f"Net: {result['salaire_net']}, Charges: {result['total_charges_salariales']}")
-```
-
-### Debugging DuckDB Queries
-```python
-from services.data_mgt import DataManager
-
-dm = DataManager()
-conn = dm.get_connection()
-
-# Query period data
-result = conn.execute("""
-    SELECT matricule, nom, salaire_brut, salaire_net
-    FROM payroll_data
-    WHERE company_id = 'COMP001'
-      AND period_year = 2025
-      AND period_month = 10
-""").fetchdf()
-
-print(result)
-```
-
 ## Role-Based Access Control
 
 **Admin Role**:
@@ -280,7 +208,7 @@ if st.session_state.get('role') == 'admin':
 │   └── audit_logs/           # Modification logs
 ├── pyproject.toml            # Project dependencies (uv/pip)
 ├── requirements.txt          # Flat dependencies
-└── deployment_guide.md       # Production deployment steps
+└── README.md                 # Project overview and instructions
 ```
 
 ## Important Constraints
@@ -324,11 +252,6 @@ Not yet implemented:
 - Automated email send of DSM XML to Monaco government
 - Automated email validation workflow with clients before employee distribution
 - Regularization lines for correcting prior period errors
-- PostgreSQL migration option for larger scale
-
-## Deployment
-
-See `deployment_guide.md` for production deployment steps.
 
 **Key deployment notes**:
 - Streamlit runs on port 8501 (reverse proxy with Nginx for HTTPS)

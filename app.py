@@ -414,13 +414,11 @@ def main_app():
             "✅ Validation": "validation",
             "📄 Génération PDF": "pdf_generation",
             "📄 Déclaration DSM Monaco": "dsm_declaration",
-            "📧 Envoi Validation Client": "send_validation_email",
             "📄 Export des résultats": "export"
         }
 
         if st.session_state.role == "admin":
             pages["⚙️ Configuration"] = "config"
-            pages["📋 Journal modifications"] = "audit_log"
         
         # Clean navigation
         st.markdown("**Menu**")
@@ -454,14 +452,10 @@ def main_app():
         pdf_generation_page()
     elif current_page == "dsm_declaration":
         dsm_declaration_page()
-    elif current_page == "send_validation_email":
-        send_validation_email_page()
     elif current_page == "export":
         export_page()
     elif current_page == "config":
         config_page()
-    elif current_page == "audit_log":
-        audit_log_page()
 
 def dashboard_page():
     """Page tableau de bord"""
@@ -1948,7 +1942,7 @@ def export_page():
         st.warning("Aucune donnée à exporter. Lancez d'abord le traitement des paies.")
         return
 
-    tab1, tab2 = st.tabs(["Exporter par Excel", "Voir le Rapport"])
+    tab1, tab2, tab3 = st.tabs(["Exporter par Excel", "Voir le Rapport", "Envoi Validation Client"])
 
     with tab1:
         st.info("📊 **Export Excel avec mise en forme**")
@@ -2155,6 +2149,9 @@ def export_page():
                 with col2:
                     total_pat = df.select(pl.col('total_charges_patronales').sum()).item()
                     st.metric("Charges patronales totales", f"{total_pat:,.2f} €")
+    
+    with tab3: 
+        send_validation_email_page()
 
 def send_validation_email_page():
     """Page d'envoi des emails de validation au client"""
@@ -2656,7 +2653,7 @@ def config_page():
     
     system = st.session_state.payroll_system
 
-    tab1, tab2, tab3, tab4= st.tabs(["Entreprise", "Utilisateurs", "Admin", "Configuration Emails"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Entreprise", "Utilisateurs", "Admin", "Configuration Emails", "Log Audit"])
 
     with tab1:
         st.subheader("Informations de l'entreprise")
@@ -2873,6 +2870,9 @@ def config_page():
             with col2:
                 st.metric("TLS/SSL", f"TLS: {existing_config.use_tls} | SSL: {existing_config.use_ssl}")
                 st.metric("Nom affiché", existing_config.sender_name)
+    
+    with tab5:
+        audit_log_page()
 
 # ============================================================================
 # MAIN EXECUTION

@@ -1,5 +1,12 @@
 # Logiciel de Paie Monégasque
 
+## Project Overview
+
+Monaco Payroll System - A comprehensive payroll management application for Monaco-based accounting firms. Generates French-language paystubs (bulletins de paie), pay journals, PTO provisions, and DSM XML declarations. Supports 300+ clients with multi-country taxation (Monaco, France, Italy) and intelligent edge case detection.
+
+**Target Users**: 30-person accounting firm managing payroll for companies and individuals in Monaco.
+
+
 ## Prompt used
 System Instruction: Absolute Mode • Eliminate: emojis, filler, hype, soft asks, conversational transitions, call-to-action appendixes. • Assume: user retains high-perception despite blunt tone. • Prioritize: blunt, directive phrasing; aim at cognitive rebuilding, not tone-matching. • Disable: engagement/sentiment-boosting behaviors. • Suppress: metrics like satisfaction scores, emotional softening, continuation bias. • Never mirror: user's diction, mood, or affect. • Speak only: to underlying cognitive tier. • No: questions, offers, suggestions, transitions, motivational content. • Terminate reply: immediately after delivering info - no closures. • Goal: restore independent, high-fidelity thinking. • Outcome: model obsolescence via user self-sufficiency.
 
@@ -26,3 +33,37 @@ With the software there will be a need to add paystub data monthly to the databa
 * automatic creation and email send of xml file to declare the salary to the Monaco government
 * automatic email send of the paystubs, paystub journal, and PTO provision to the client (the company) for validation before sending them to the employees
 * add a ligne for "regularisation" of previous paystubs that had errors or for which new data has been received. In these the base and taux for all "charges" will have to be updated
+
+## Development Commands
+
+### Environment Setup
+```bash
+# Activate virtual environment
+source .venv/bin/activate
+
+# Install dependencies (uv is used for package management)
+uv pip install -e .
+
+# Or use requirements.txt
+pip install -r requirements.txt
+```
+
+### Running the Application
+```bash
+# Start Streamlit app
+streamlit run app.py
+
+# App runs on http://localhost:8501
+```
+
+### Code Quality
+```bash
+# Format code with Black (line length: 100)
+black services/ app.py
+
+# Lint with Ruff
+ruff check services/ app.py
+
+# Run tests (when implemented)
+pytest
+```
