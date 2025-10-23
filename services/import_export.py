@@ -487,7 +487,6 @@ class DataConsolidation:
         Returns:
             Path vers le fichier parquet
         """
-        from pathlib import Path
         
         data_dir = Path("data") / "consolidated" / str(year)
         data_dir.mkdir(parents=True, exist_ok=True)

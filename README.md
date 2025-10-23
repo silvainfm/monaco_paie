@@ -23,6 +23,7 @@ the agent should give a summary of the changes made to the accountant<task>
 <thinking> Ask for clarification on the data, the software's use and parameters as necessary.
 With the software there will be a need to add paystub data monthly to the database <thinking>
 
+Keep planning, make the plan multi-phase.
 ## Features implemented
 * Users can modify the 2 last months of paystubs
 * drop down menu for rubriques int he valdiation page
