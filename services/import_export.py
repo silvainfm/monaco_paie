@@ -500,6 +500,11 @@ class DataConsolidation:
         """Sauvegarder les données pour une période"""
         file_path = DataConsolidation.get_period_file(company_id, month, year)
         
+        # Remove metadata columns before re-adding
+        metadata_cols = ['company_id', 'period_year', 'period_month', 'period_str', 'last_modified']
+        existing_cols = [col for col in df.columns if col not in metadata_cols]
+        df = df.select(existing_cols)
+        
         # Ajouter les métadonnées
         df = df.with_columns([
             pl.lit(company_id).alias('company_id'),
