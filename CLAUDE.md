@@ -214,7 +214,7 @@ if st.session_state.get('role') == 'admin':
 
 - **Backend**: Python 3.11+
 - **Database**: DuckDB (in-process analytical DB, thread-safe)
-- **DataFrames**: Polars (preferred over Pandas for performance)
+- **DataFrames**: Polars (preferred over Pandas for performance) https://docs.pola.rs/api/python/stable/search.html
 - **UI**: Streamlit
 - **PDF**: ReportLab
 - **Authentication**: Bcrypt (12 rounds)
