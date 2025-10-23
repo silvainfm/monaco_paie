@@ -67,3 +67,30 @@ ruff check services/ app.py
 # Run tests (when implemented)
 pytest
 ```
+### Monaco Payroll Calculations
+
+**Social Charges** (18 types in `ChargesSocialesMonaco`):
+- **Salarial**: CAR (2.15%), CCSS (7.40% T1 + 2.00% T2), ASSEDIC (1.30%), retirement contributions, equilibrium
+- **Patronal**: CAR (2.15%), CMRC TA/TB (3.34%/7.72%), ASSEDIC (1.90%), retirement, equilibrium, prevoyance
+
+**Tranches** (income tiers):
+- T1: Up to 3428€/month (1x social security ceiling)
+- T2: 3428€ to 13712€/month (1x to 4x ceiling)
+
+**Overtime**:
+- 125%: First 8 hours over base (169h/month)
+- 150%: Beyond 8 hours overtime
+
+**PTO Accrual**: 2.08 days per month (25 days/year), with provision accounting
+
+**Cross-Border Tax**:
+- Monaco residents: No income tax, full social charges
+- France residents: CSG/CRDS (9.70%), progressive tax (11%-45%), withholding in France
+- Italy residents: IRPEF (23%-43%), 15% Monaco withholding
+
+## Deployment Notes
+**Key deployment notes**:
+- Streamlit runs on port 8501 (reverse proxy with Nginx for HTTPS)
+- DuckDB file must have write permissions for all accountants
+- SMTP credentials or OAuth2 setup required for email
+- Windows Server 2019/2022 recommended (accounting firm uses Windows)

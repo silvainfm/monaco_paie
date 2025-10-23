@@ -13,10 +13,6 @@ Monaco Payroll System - A comprehensive payroll management application for Monac
 
 **Target Users**: 30-person accounting firm managing payroll for companies and individuals in Monaco.
 
-
-### Database Operations
-The DuckDB database is located at `data/payroll.duckdb`. No migrations needed - schema is auto-created by `DataManager` on first run.
-
 ## Architecture Overview
 
 ### Service Layer Structure
@@ -33,6 +29,7 @@ The application uses a **layered architecture** with 12 specialized services in 
 - `data_mgt.py` - DuckDB connection pool, schema management, CRUD operations
   - Primary table: `payroll_data` (113 columns, composite PK: company_id, period_year, period_month, matricule)
   - Thread-safe with connection pooling (4 threads, 2GB limit)
+  - DuckDB database, located at `data/payroll.duckdb`. No migrations needed - schema is auto-created by `DataManager` on first run.
 
 **Document Generation**:
 - `pdf_generation.py` - Generates paystubs, journals, PTO provisions using ReportLab
@@ -95,27 +92,6 @@ Save to DuckDB → Generate PDFs → Send Emails → DSM XML
 - Edge cases: edge_case_flag (BOOLEAN), edge_case_reason, statut_validation, remarques
 
 **`companies` table**: id, name, siret, address, phone, email
-
-### Monaco Payroll Calculations
-
-**Social Charges** (18 types in `ChargesSocialesMonaco`):
-- **Salarial**: CAR (2.15%), CCSS (7.40% T1 + 2.00% T2), ASSEDIC (1.30%), retirement contributions, equilibrium
-- **Patronal**: CAR (2.15%), CMRC TA/TB (3.34%/7.72%), ASSEDIC (1.90%), retirement, equilibrium, prevoyance
-
-**Tranches** (income tiers):
-- T1: Up to 3428€/month (1x social security ceiling)
-- T2: 3428€ to 13712€/month (1x to 4x ceiling)
-
-**Overtime**:
-- 125%: First 8 hours over base (169h/month)
-- 150%: Beyond 8 hours overtime
-
-**PTO Accrual**: 2.08 days per month (25 days/year), with provision accounting
-
-**Cross-Border Tax**:
-- Monaco residents: No income tax, full social charges
-- France residents: CSG/CRDS (9.70%), progressive tax (11%-45%), withholding in France
-- Italy residents: IRPEF (23%-43%), 15% Monaco withholding
 
 ## Monaco-Specific Context
 
@@ -252,9 +228,3 @@ Not yet implemented:
 - Automated email send of DSM XML to Monaco government
 - Automated email validation workflow with clients before employee distribution
 - Regularization lines for correcting prior period errors
-
-**Key deployment notes**:
-- Streamlit runs on port 8501 (reverse proxy with Nginx for HTTPS)
-- DuckDB file must have write permissions for all accountants
-- SMTP credentials or OAuth2 setup required for email
-- Windows Server 2019/2022 recommended (accounting firm uses Windows)
