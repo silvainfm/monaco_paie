@@ -11,7 +11,8 @@ import numpy as np
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
-
+from services.payroll_calculations import MonacoPayrollConstants, ChargesSocialesMonaco, CalculateurPaieMonaco
+from services.pdf_generation import PaystubPDFGenerator
 
 # ============================================================================
 # RUBRICS AND CODES
@@ -19,7 +20,6 @@ from typing import Dict, List
 
 def get_salary_rubrics() -> List[Dict]:
     """Get salary element rubrics from pdf_generation"""
-    from services.pdf_generation import PaystubPDFGenerator
     codes = PaystubPDFGenerator.RUBRIC_CODES
 
     return [
@@ -39,9 +39,6 @@ def get_salary_rubrics() -> List[Dict]:
 
 def get_all_available_salary_rubrics(year: int = None) -> List[Dict]:
     """Get all available salary rubrics including constants from MonacoPayrollConstants"""
-    from services.payroll_calculations import MonacoPayrollConstants
-    from services.pdf_generation import PaystubPDFGenerator
-
     all_rubrics = []
 
     # Add standard salary rubrics
@@ -101,7 +98,6 @@ def get_available_rubrics_for_employee(employee_data: Dict, year: int = None) ->
 
 def get_charge_rubrics() -> Dict[str, List[Dict]]:
     """Get social charge rubrics from payroll_calculations"""
-    from services.payroll_calculations import ChargesSocialesMonaco
 
     salariales = []
     for key, params in ChargesSocialesMonaco.COTISATIONS_SALARIALES.items():
@@ -129,7 +125,6 @@ def get_charge_rubrics() -> Dict[str, List[Dict]]:
 
 def get_available_charges_for_employee(employee_data: Dict, year: int = None) -> List[Dict]:
     """Get charge codes not currently displayed for this employee"""
-    from services.payroll_calculations import ChargesSocialesMonaco
 
     # Initialize charges calculator
     charges_calc = ChargesSocialesMonaco(year)
@@ -208,14 +203,12 @@ def log_modification(matricule: str, field: str, old_value, new_value, user: str
     with open(log_file, 'a', encoding='utf-8') as f:
         f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
 
-
 # ============================================================================
 # PAYSLIP RECALCULATION
 # ============================================================================
 
 def recalculate_employee_payslip(employee_data: Dict, modifications: Dict) -> Dict:
     """Recalculate payslip after modifications"""
-    from services.payroll_calculations import CalculateurPaieMonaco
 
     # Deep copy and clean all numeric fields first
     updated_data = {}
@@ -269,7 +262,6 @@ def recalculate_employee_payslip(employee_data: Dict, modifications: Dict) -> Di
     calculator = CalculateurPaieMonaco()
     return calculator.process_employee_payslip(updated_data)
 
-
 # ============================================================================
 # DATA CLEANING AND VALIDATION
 # ============================================================================
@@ -315,7 +307,6 @@ def clean_employee_data_for_pdf(employee_dict: Dict) -> Dict:
 
     return cleaned
 
-
 def safe_get_charge_value(details_charges: Dict, charge_type: str, charge_code: str) -> float:
     """Safely extract charge value from details_charges structure"""
     try:
@@ -329,7 +320,6 @@ def safe_get_charge_value(details_charges: Dict, charge_type: str, charge_code: 
         return 0.0
     except (TypeError, ValueError, AttributeError):
         return 0.0
-
 
 def safe_get_numeric(row: Dict, field: str, default: float = 0.0) -> float:
     """Safely extract numeric value from dict, handling nested structures"""
