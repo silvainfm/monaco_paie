@@ -174,8 +174,10 @@ class ExcelImportExport:
         "Matricule": "matricule",
         "Nom": "nom",
         "Prénom": "prenom",
+        "Prenom": "prenom",  # No accent variant
         "Base heures": "base_heures",
         "Heures congés payés": "heures_conges_payes",
+        "Heures conges payes": "heures_conges_payes",  # No accent variant
         "Heures absence": "heures_absence",
         "Type absence": "type_absence",
         "Prime": "prime",
@@ -183,6 +185,7 @@ class ExcelImportExport:
         "Heures Sup 125": "heures_sup_125",
         "Heures Sup 150": "heures_sup_150",
         "Heures jours fériés": "heures_jours_feries",
+        "Heures jours feries": "heures_jours_feries",  # No accent variant
         "Heures dimanche": "heures_dimanche",
         "Tickets restaurant": "tickets_restaurant",
         "Avantage logement": "avantage_logement",
@@ -191,19 +194,29 @@ class ExcelImportExport:
         "Remarques": "remarques",
         "Salaire de base": "salaire_base",
         "Pays résidence": "pays_residence",
+        "Pays residence": "pays_residence",  # No accent variant
         "Taux prélèvement source": "taux_prelevement_source",
+        "Taux prelevement source": "taux_prelevement_source",  # No accent variant
         "Email": "email",
         "Date de naissance": "date_naissance",
         "Date de Naissance": "date_naissance",  # Support both lowercase/uppercase variants
         "Affiliation AC": "affiliation_ac",
+        "Affiliation ac": "affiliation_ac",  # Lowercase variant
         "Affiliation RC": "affiliation_rc",
+        "Affiliation rc": "affiliation_rc",  # Lowercase variant
         "Affiliation CAR": "affiliation_car",
+        "Affiliation car": "affiliation_car",  # Lowercase variant
         "Télétravail": "teletravail",
+        "Teletravail": "teletravail",  # No accent variant
         "Pays télétravail": "pays_teletravail",
+        "Pays teletravail": "pays_teletravail",  # No accent variant
         "Administrateur salarié": "administrateur_salarie",
+        "Administrateur salarie": "administrateur_salarie",  # No accent variant
         "CP Date début": "cp_date_debut",
+        "CP Date debut": "cp_date_debut",  # No accent variant
         "CP Date fin": "cp_date_fin",
         "Maladie Date début": "maladie_date_debut",
+        "Maladie Date debut": "maladie_date_debut",  # No accent variant
         "Maladie Date fin": "maladie_date_fin"
     }
     
@@ -227,11 +240,32 @@ class ExcelImportExport:
     ]
     
     @classmethod
+    def _get_column_variants(cls, col_name: str) -> List[str]:
+        """Get all case/accent variants for a column name"""
+        variants = [col_name]
+        # Find all keys in mapping that map to the same internal name
+        if col_name in cls.EXCEL_COLUMN_MAPPING.values():
+            # This is an internal name, find all Excel names that map to it
+            variants = [k for k, v in cls.EXCEL_COLUMN_MAPPING.items() if v == col_name]
+        else:
+            # This is an Excel name, find all other Excel names that map to same internal
+            internal = cls.EXCEL_COLUMN_MAPPING.get(col_name)
+            if internal:
+                variants = [k for k, v in cls.EXCEL_COLUMN_MAPPING.items() if v == internal]
+        return variants
+
+    @classmethod
     def validate_excel_format(cls, df: pl.DataFrame) -> Tuple[bool, List[str]]:
         """Valider le format du fichier Excel importé"""
         errors = []
-        
-        missing_columns = set(cls.REQUIRED_COLUMNS) - set(df.columns)
+
+        # Check required columns (accept any variant)
+        missing_columns = []
+        for req_col in cls.REQUIRED_COLUMNS:
+            variants = cls._get_column_variants(req_col)
+            if not any(v in df.columns for v in variants):
+                missing_columns.append(req_col)
+
         if missing_columns:
             errors.append(f"Colonnes manquantes: {', '.join(missing_columns)}")
         
