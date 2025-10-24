@@ -194,6 +194,7 @@ class ExcelImportExport:
         "Taux prélèvement source": "taux_prelevement_source",
         "Email": "email",
         "Date de naissance": "date_naissance",
+        "Date de Naissance": "date_naissance",  # Support both lowercase/uppercase variants
         "Affiliation AC": "affiliation_ac",
         "Affiliation RC": "affiliation_rc",
         "Affiliation CAR": "affiliation_car",
@@ -286,8 +287,10 @@ class ExcelImportExport:
                     df = df.with_columns(pl.lit('non_payee').alias(col))
                 elif col == 'type_prime':
                     df = df.with_columns(pl.lit('performance').alias(col))
+                elif col in ['date_sortie', 'date_naissance']:
+                    df = df.with_columns(pl.lit(None, dtype=pl.Date).alias(col))
                 else:
-                    df = df.with_columns(pl.lit(None).alias(col))
+                    df = df.with_columns(pl.lit(None, dtype=pl.Utf8).alias(col))
 
         numeric_columns = [
             'base_heures', 'salaire_base', 'heures_sup_125', 'heures_sup_150',
@@ -302,9 +305,15 @@ class ExcelImportExport:
                     pl.col(col).cast(pl.Float64, strict=False).fill_null(0.0)
                 )
 
-        if 'date_sortie' in df.columns:
+        # Parse date columns if they're strings (not already Date type)
+        if 'date_sortie' in df.columns and df['date_sortie'].dtype != pl.Date:
             df = df.with_columns(
                 pl.col('date_sortie').str.strptime(pl.Date, "%Y-%m-%d", strict=False)
+            )
+
+        if 'date_naissance' in df.columns and df['date_naissance'].dtype != pl.Date:
+            df = df.with_columns(
+                pl.col('date_naissance').str.strptime(pl.Date, "%Y-%m-%d", strict=False)
             )
 
         if 'pays_residence' in df.columns:
