@@ -265,7 +265,9 @@ class ExcelImportExport:
         if not is_valid:
             raise ValueError(f"Erreurs de validation: {'; '.join(errors)}")
 
-        df = df.rename(cls.EXCEL_COLUMN_MAPPING)
+        # Only rename columns that exist in the DataFrame
+        rename_mapping = {k: v for k, v in cls.EXCEL_COLUMN_MAPPING.items() if k in df.columns}
+        df = df.rename(rename_mapping)
 
         # Ensure matricule is string after rename
         if 'matricule' in df.columns:
