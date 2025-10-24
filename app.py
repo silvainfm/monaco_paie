@@ -576,8 +576,7 @@ def import_page():
                     df_import = df_import.rename(system.excel_manager.EXCEL_COLUMN_MAPPING)
                 else:
                     # Excel handling - specify schema to preserve leading zeros
-                    schema_overrides = {"Matricule": pl.Utf8}
-                    df_import = pl.read_excel(uploaded_file, schema_overrides=schema_overrides)
+                    df_import = pl.read_excel(uploaded_file, schema_overrides=dtypes)
                     df_import = df_import.rename(system.excel_manager.EXCEL_COLUMN_MAPPING)
 
                 # Ensure matricule is string after any processing
