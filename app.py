@@ -568,23 +568,20 @@ def import_page():
         
         if uploaded_file:
             try:
+                # Use ExcelImportExport for proper validation and column mapping
                 if uploaded_file.name.endswith('.csv'):
-                    # Specify dtypes to preserve leading zeros in matricule
+                    # CSV: read and apply filtered mapping
                     dtypes = {"Matricule": pl.Utf8}
                     df_import = pl.read_csv(uploaded_file, dtypes=dtypes)
-                    # Apply column mapping
-                    df_import = df_import.rename(system.excel_manager.EXCEL_COLUMN_MAPPING)
+                    # Only rename columns that exist (support case/accent variants)
+                    rename_mapping = {k: v for k, v in system.excel_manager.EXCEL_COLUMN_MAPPING.items() if k in df_import.columns}
+                    df_import = df_import.rename(rename_mapping)
+                    # Ensure matricule is string
+                    if 'matricule' in df_import.columns:
+                        df_import = df_import.with_columns(pl.col('matricule').cast(pl.Utf8, strict=False))
                 else:
-                    # Excel handling - specify schema to preserve leading zeros
-                    schema_override = {"Matricule": pl.Utf8}
-                    df_import = pl.read_excel(uploaded_file, schema_overrides=schema_override)
-                    df_import = df_import.rename(system.excel_manager.EXCEL_COLUMN_MAPPING)
-
-                # Ensure matricule is string after any processing
-                if 'matricule' in df_import.columns:
-                    df_import = df_import.with_columns(
-                        pl.col('matricule').cast(pl.Utf8, strict=False)
-                    )
+                    # Excel: use full import method with validation
+                    df_import = system.excel_manager.import_from_excel(uploaded_file)
                 
                 st.success(f"✅ {len(df_import)} employés importés avec succès")
                 
