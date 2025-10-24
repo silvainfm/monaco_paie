@@ -1016,7 +1016,27 @@ def validation_page():
                 mod_key = f"modifications_{unique_key}"
                 if mod_key not in st.session_state:
                     st.session_state[mod_key] = {}
-                
+
+                # CHECK FOR MISSING DATE DE NAISSANCE
+                current_date_naissance = row.get('date_naissance')
+                if current_date_naissance is None or current_date_naissance == '' or str(current_date_naissance).strip() == '':
+                    st.warning("⚠️ **Date de naissance manquante** - Veuillez renseigner la date de naissance de cet employé")
+
+                    # Date input for missing date de naissance
+                    col_dob1, col_dob2 = st.columns([2, 3])
+                    with col_dob1:
+                        new_date_naissance = st.date_input(
+                            "Date de naissance",
+                            value=date(1990, 1, 1),
+                            key=f"date_naissance_{unique_key}",
+                            format="DD/MM/YYYY"
+                        )
+                        if new_date_naissance:
+                            st.session_state[mod_key]['date_naissance'] = new_date_naissance.strftime('%Y-%m-%d')
+                            st.info(f"✅ Date de naissance sélectionnée: {new_date_naissance.strftime('%d/%m/%Y')}")
+
+                    st.markdown("---")
+
                 tab1, tab2 = st.tabs(["💰 Éléments de Salaire", "📊 Charges Sociales"])
                 
                 # TAB 1: SALARY ELEMENTS
@@ -1555,11 +1575,11 @@ def validation_page():
                                     # Log base modifications
                                     for charge_code, base_value in new_value.items():
                                         log_modification(
-                                            matricule, 
-                                            f"base_{charge_code}", 
-                                            None, 
+                                            matricule,
+                                            f"base_{charge_code}",
+                                            None,
                                             base_value,
-                                            st.session_state.user, 
+                                            st.session_state.user,
                                             reason
                                         )
                                 else:
@@ -1568,13 +1588,28 @@ def validation_page():
                                         matricule, field, old_value, new_value,
                                         st.session_state.user, reason
                                     )
-                            
+
+                            # Update DataFrame with modifications for this employee
+                            for field, new_value in st.session_state[mod_key].items():
+                                if field not in ['charge_bases', 'charges_salariales', 'charges_patronales']:
+                                    # Update only the row for this employee
+                                    if field in df.columns:
+                                        df = df.with_columns([
+                                            pl.when(pl.col('matricule') == matricule)
+                                            .then(pl.lit(new_value))
+                                            .otherwise(pl.col(field))
+                                            .alias(field)
+                                        ])
+
+                            # Update session state with modified dataframe
+                            st.session_state.processed_data = df
+
                             # Save to consolidated data
                             month, year = map(int, st.session_state.current_period.split('-'))
                             st.session_state.payroll_system.data_consolidator.save_period_data(
                                 df, st.session_state.current_company, month, year
                             )
-                            
+
                             st.success("✅ Modifications sauvegardées!")
                             st.session_state[mod_key] = {}
                             st.session_state[edit_key] = False
