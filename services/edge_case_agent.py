@@ -255,7 +255,8 @@ class EdgeCaseAgent:
 
         # Load previous month data
         prev_month, prev_year = self._get_previous_month(month, year)
-        prev_df = self.data_consolidator.load_period_data(company, prev_month, prev_year)
+        from services.data_mgt import DataManager
+        prev_df = DataManager.load_period_data(company, prev_month, prev_year)
 
         if prev_df is None or (isinstance(prev_df, pl.DataFrame) and prev_df.is_empty()):
             logger.warning("No previous month data available for comparison")
@@ -587,7 +588,8 @@ class EdgeCaseAgent:
                 hist_month += 12
                 hist_year -= 1
 
-            hist_df = self.data_consolidator.load_period_data(company, hist_month, hist_year)
+            from services.data_mgt import DataManager
+            hist_df = DataManager.load_period_data(company, hist_month, hist_year)
             if hist_df is not None and not (isinstance(hist_df, pl.DataFrame) and hist_df.is_empty()):
                 if not isinstance(hist_df, pl.DataFrame):
                     hist_df = pl.DataFrame(hist_df)
