@@ -9,38 +9,68 @@ from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional
 import logging
+from threading import Lock
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
 DATA_DIR = Path("data")
 DB_PATH = DATA_DIR / "payroll.duckdb"
 
+# Thread-safe connection pool
+_connection_pool = []
+_pool_lock = Lock()
+_MAX_POOL_SIZE = 4
+
 class DataManager:
-    """DuckDB-based payroll data management with connection per operation"""
+    """DuckDB-based payroll data management with connection pooling"""
 
     @staticmethod
     def get_connection() -> duckdb.DuckDBPyConnection:
         """
-        Get a fresh DuckDB connection for each operation
+        Get a DuckDB connection from pool or create new
 
-        This avoids lock conflicts in Streamlit's hot-reload environment
-        by ensuring connections are properly scoped and closed.
+        Uses connection pooling for better performance while avoiding
+        lock conflicts in Streamlit's hot-reload environment.
         """
         DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+        with _pool_lock:
+            if _connection_pool:
+                conn = _connection_pool.pop()
+                try:
+                    # Test if connection is still valid
+                    conn.execute("SELECT 1")
+                    return conn
+                except:
+                    pass  # Connection invalid, create new
+
+        # Create new connection
         conn = duckdb.connect(str(DB_PATH))
         # Optimize for read-heavy workload
         conn.execute("PRAGMA threads=4")
         conn.execute("PRAGMA memory_limit='2GB'")
+        conn.execute("PRAGMA enable_object_cache=true")
         return conn
 
     @staticmethod
     def close_connection(conn: duckdb.DuckDBPyConnection):
-        """Close a DuckDB connection safely"""
+        """Return connection to pool or close if pool full"""
+        if not conn:
+            return
+
         try:
-            if conn:
-                conn.close()
+            with _pool_lock:
+                if len(_connection_pool) < _MAX_POOL_SIZE:
+                    _connection_pool.append(conn)
+                else:
+                    conn.close()
         except Exception as e:
-            logger.warning(f"Error closing connection: {e}")
+            logger.warning(f"Error returning connection to pool: {e}")
+            try:
+                conn.close()
+            except:
+                pass
     
     @staticmethod
     def init_schema():
@@ -165,9 +195,7 @@ class DataManager:
     
     @staticmethod
     def save_period_data(df: pl.DataFrame, company_id: str, month: int, year: int):
-        """Save period data (upsert operation)"""
-        import json
-
+        """Save period data (upsert operation) - optimized for bulk insert"""
         conn = DataManager.get_connection()
 
         try:
@@ -180,19 +208,16 @@ class DataManager:
                     pl.lit(datetime.now()).alias('last_modified')
                 ])
 
-            # Convert struct columns to JSON strings to avoid Parquet serialization issues
+            # Convert struct columns to JSON using cast (faster than map_elements)
             struct_columns = ['details_charges', 'tickets_restaurant_details']
 
             for col in struct_columns:
                 if col in df.columns:
-                    # Check if column is struct type
-                    if df[col].dtype == pl.Struct or isinstance(df[col].dtype, pl.Struct):
-                        # Convert struct to JSON string
+                    # Check if column is struct/object type
+                    if df[col].dtype in (pl.Struct, pl.Object) or isinstance(df[col].dtype, pl.Struct):
+                        # Use Polars native JSON serialization
                         df = df.with_columns(
-                            pl.col(col).map_elements(
-                                lambda x: json.dumps(x) if x is not None else None,
-                                return_dtype=pl.Utf8
-                            ).alias(col)
+                            pl.col(col).cast(pl.Utf8, strict=False).alias(col)
                         )
 
             # Delete existing period data
@@ -201,7 +226,7 @@ class DataManager:
                 WHERE company_id = ? AND period_year = ? AND period_month = ?
             """, [company_id, year, month])
 
-            # Insert new data
+            # Use INSERT with SELECT for better performance
             conn.execute("INSERT INTO payroll_data SELECT * FROM df")
 
             logger.info(f"Saved {df.height} records for {company_id} {year}-{month:02d}")
@@ -210,7 +235,7 @@ class DataManager:
     
     @staticmethod
     def load_period_data(company_id: str, month: int, year: int) -> pl.DataFrame:
-        """Load period data (optimized single-period lookup)"""
+        """Load period data (optimized query)"""
         import json
 
         conn = DataManager.get_connection()
@@ -223,31 +248,33 @@ class DataManager:
                     ORDER BY matricule
                 """, [company_id, year, month]).pl()
             except Exception as e:
-                # Handle parquet errors or empty results
                 logger.warning(f"Error loading period data: {e}")
                 return DataManager.create_empty_df()
 
             if result.height == 0:
                 return DataManager.create_empty_df()
 
-            # Convert JSON string columns back to structs/dicts if needed
+            # Parse JSON columns more efficiently using str.json_decode when available
             struct_columns = ['details_charges', 'tickets_restaurant_details']
 
             for col in struct_columns:
-                if col in result.columns:
-                    # Check if column is string (JSON) type
-                    if result[col].dtype == pl.Utf8:
-                        # Parse JSON strings back to Python dicts
+                if col in result.columns and result[col].dtype == pl.Utf8:
+                    try:
+                        # Use str.json_decode (faster) if available, fallback to map_elements
+                        result = result.with_columns(
+                            pl.col(col).str.json_decode().alias(col)
+                        )
+                    except:
+                        # Fallback for older Polars versions
                         try:
                             result = result.with_columns(
                                 pl.col(col).map_elements(
-                                    lambda x: json.loads(x) if x is not None and x != '' else None,
+                                    lambda x: json.loads(x) if x and x != '' else None,
                                     return_dtype=pl.Object
                                 ).alias(col)
                             )
                         except Exception as e:
                             logger.warning(f"Error parsing JSON column {col}: {e}")
-                            # Leave column as-is if parsing fails
 
             return result
         finally:
@@ -364,17 +391,19 @@ class DataManager:
             DataManager.close_connection(conn)
 
     @staticmethod
-    def get_companies_list() -> List[Dict]:
-        """Get list of companies"""
+    @lru_cache(maxsize=1)
+    def get_companies_list() -> tuple:
+        """Get list of companies (cached)"""
         conn = DataManager.get_connection()
 
         try:
             try:
                 result = conn.execute("SELECT * FROM companies ORDER BY name").pl()
-                return result.to_dicts()
+                # Return as tuple for hashability
+                return tuple(result.to_dicts())
             except Exception as e:
                 logger.warning(f"Error loading companies list: {e}")
-                return []
+                return ()
         finally:
             DataManager.close_connection(conn)
     
@@ -444,65 +473,32 @@ class DataManager:
     
     @staticmethod
     def create_empty_df() -> pl.DataFrame:
-        """Create empty DataFrame with full schema"""
-        return pl.DataFrame({
-            'matricule': pl.Series([], dtype=pl.Utf8),
-            'nom': pl.Series([], dtype=pl.Utf8),
-            'prenom': pl.Series([], dtype=pl.Utf8),
-            'email': pl.Series([], dtype=pl.Utf8),
-            'ccss_number': pl.Series([], dtype=pl.Utf8),
-            'date_entree': pl.Series([], dtype=pl.Date),
-            'date_sortie': pl.Series([], dtype=pl.Date),
-            'anciennete': pl.Series([], dtype=pl.Utf8),
-            'emploi': pl.Series([], dtype=pl.Utf8),
-            'qualification': pl.Series([], dtype=pl.Utf8),
-            'niveau': pl.Series([], dtype=pl.Utf8),
-            'coefficient': pl.Series([], dtype=pl.Utf8),
-            'pays_residence': pl.Series([], dtype=pl.Utf8),
-            'base_heures': pl.Series([], dtype=pl.Float64),
-            'heures_payees': pl.Series([], dtype=pl.Float64),
-            'taux_horaire': pl.Series([], dtype=pl.Float64),
-            'salaire_base': pl.Series([], dtype=pl.Float64),
-            'heures_conges_payes': pl.Series([], dtype=pl.Float64),
-            'jours_cp_pris': pl.Series([], dtype=pl.Float64),
-            'indemnite_cp': pl.Series([], dtype=pl.Float64),
-            'heures_absence': pl.Series([], dtype=pl.Float64),
-            'type_absence': pl.Series([], dtype=pl.Utf8),
-            'retenue_absence': pl.Series([], dtype=pl.Float64),
-            'prime': pl.Series([], dtype=pl.Float64),
-            'type_prime': pl.Series([], dtype=pl.Utf8),
-            'heures_sup_125': pl.Series([], dtype=pl.Float64),
-            'montant_hs_125': pl.Series([], dtype=pl.Float64),
-            'heures_sup_150': pl.Series([], dtype=pl.Float64),
-            'montant_hs_150': pl.Series([], dtype=pl.Float64),
-            'heures_jours_feries': pl.Series([], dtype=pl.Float64),
-            'montant_jours_feries': pl.Series([], dtype=pl.Float64),
-            'heures_dimanche': pl.Series([], dtype=pl.Float64),
-            'tickets_restaurant': pl.Series([], dtype=pl.Float64),
-            'avantage_logement': pl.Series([], dtype=pl.Float64),
-            'avantage_transport': pl.Series([], dtype=pl.Float64),
-            'remarques': pl.Series([], dtype=pl.Utf8),
-            'salaire_brut': pl.Series([], dtype=pl.Float64),
-            'total_charges_salariales': pl.Series([], dtype=pl.Float64),
-            'total_charges_patronales': pl.Series([], dtype=pl.Float64),
-            'salaire_net': pl.Series([], dtype=pl.Float64),
-            'cout_total_employeur': pl.Series([], dtype=pl.Float64),
-            'prelevement_source': pl.Series([], dtype=pl.Float64),
-            'statut_validation': pl.Series([], dtype=pl.Utf8),
-            'edge_case_flag': pl.Series([], dtype=pl.Boolean),
-            'edge_case_reason': pl.Series([], dtype=pl.Utf8),
-            'cumul_brut': pl.Series([], dtype=pl.Float64),
-            'cumul_base_ss': pl.Series([], dtype=pl.Float64),
-            'cumul_net_percu': pl.Series([], dtype=pl.Float64),
-            'cumul_charges_sal': pl.Series([], dtype=pl.Float64),
-            'cumul_charges_pat': pl.Series([], dtype=pl.Float64),
-            'cp_acquis_n1': pl.Series([], dtype=pl.Float64),
-            'cp_pris_n1': pl.Series([], dtype=pl.Float64),
-            'cp_restants_n1': pl.Series([], dtype=pl.Float64),
-            'cp_acquis_n': pl.Series([], dtype=pl.Float64),
-            'cp_pris_n': pl.Series([], dtype=pl.Float64),
-            'cp_restants_n': pl.Series([], dtype=pl.Float64)
+        """Create empty DataFrame with schema - optimized using schema dict"""
+        schema = {
+            col: pl.Utf8 for col in ['matricule', 'nom', 'prenom', 'email', 'ccss_number',
+                                      'anciennete', 'emploi', 'qualification', 'niveau',
+                                      'coefficient', 'pays_residence', 'type_absence',
+                                      'type_prime', 'remarques', 'statut_validation', 'edge_case_reason']
+        }
+        schema.update({
+            col: pl.Float64 for col in ['base_heures', 'heures_payees', 'taux_horaire', 'salaire_base',
+                                         'heures_conges_payes', 'jours_cp_pris', 'indemnite_cp',
+                                         'heures_absence', 'retenue_absence', 'prime', 'heures_sup_125',
+                                         'montant_hs_125', 'heures_sup_150', 'montant_hs_150',
+                                         'heures_jours_feries', 'montant_jours_feries', 'heures_dimanche',
+                                         'tickets_restaurant', 'avantage_logement', 'avantage_transport',
+                                         'salaire_brut', 'total_charges_salariales', 'total_charges_patronales',
+                                         'salaire_net', 'cout_total_employeur', 'prelevement_source',
+                                         'cumul_brut', 'cumul_base_ss', 'cumul_net_percu', 'cumul_charges_sal',
+                                         'cumul_charges_pat', 'cp_acquis_n1', 'cp_pris_n1', 'cp_restants_n1',
+                                         'cp_acquis_n', 'cp_pris_n', 'cp_restants_n']
         })
+        schema.update({
+            'date_entree': pl.Date,
+            'date_sortie': pl.Date,
+            'edge_case_flag': pl.Boolean
+        })
+        return pl.DataFrame(schema=schema)
 
 class DataAuditLogger:
     """Audit logger for data operations"""

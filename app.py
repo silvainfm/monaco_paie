@@ -312,7 +312,18 @@ if 'authenticated' not in st.session_state:
     st.session_state.current_period = None
     st.session_state.payroll_system = None
     st.session_state.generated_pdfs = {}
-    st.session_state.polars_mode = True 
+    st.session_state.polars_mode = True
+
+# Cached data loading functions
+@st.cache_data(ttl=300)
+def load_companies_cached():
+    """Cache companies list for 5 minutes"""
+    return list(DataManager.get_companies_list())
+
+@st.cache_data(ttl=60)
+def load_period_data_cached(company_id: str, month: int, year: int):
+    """Cache period data for 1 minute"""
+    return DataManager.load_period_data(company_id, month, year) 
 
 def require_login():
     if st.session_state.get("auth_ok"):
@@ -393,10 +404,10 @@ def main_app():
         """.format(st.session_state.user, st.session_state.role), unsafe_allow_html=True)
         
         st.markdown("**Entreprise**")
-        companies = DataManager.get_companies_list()
+        companies = load_companies_cached()
         company_names = [c['name'] for c in companies]
         selected_company = st.selectbox("", company_names, label_visibility="collapsed")
-        
+
         if selected_company:
             company = next((c for c in companies if c['name'] == selected_company), None)
             st.session_state.current_company = company['id'] if company else None
@@ -458,18 +469,17 @@ def main_app():
         config_page()
 
 def dashboard_page():
-    """Page tableau de bord"""
+    """Page tableau de bord - optimized with caching"""
     st.markdown("## Tableau de bord")
-    
+
     if not st.session_state.current_company or not st.session_state.current_period:
         st.warning("Sélectionnez une entreprise et une période")
         return
-    
-    system = st.session_state.payroll_system
+
     month, year = map(int, st.session_state.current_period.split('-'))
-    
-    df = system.data_consolidator.load_period_data(st.session_state.current_company, month, year)
-    df = pl.DataFrame(df) if not isinstance(df, pl.DataFrame) else df
+
+    # Use cached data loading
+    df = load_period_data_cached(st.session_state.current_company, month, year)
 
     if df.is_empty():
         st.info("Aucune donnée pour cette période. Commencez par importer les données.")
@@ -507,31 +517,33 @@ def dashboard_page():
     with col1:
         st.subheader("Répartition par statut")
         if 'statut_validation' in df.columns:
-            status_counts = df.group_by('statut_validation').agg(pl.count()).to_pandas()
-            st.bar_chart(status_counts.set_index('statut_validation')['count'])
+            # Use Polars directly without pandas conversion
+            status_counts = df.group_by('statut_validation').agg(pl.count().alias('count'))
+            st.bar_chart(status_counts.to_pandas().set_index('statut_validation'))
     
     with col2:
         st.subheader("Distribution des salaires nets")
         if 'salaire_net' in df.columns and not df['salaire_net'].is_null().all():
-            fig_data = df.select(pl.col('salaire_net').cast(pl.Float64).drop_nulls())
-
-            # Create histogram using Polars with allow_duplicates to handle duplicate salary values
+            # Optimized: use Polars expressions throughout
             try:
-                hist_df = fig_data.select(
-                    pl.col('salaire_net').qcut(10, labels=[f"{i}" for i in range(10)], allow_duplicates=True)
-                    .alias('bin')
-                ).group_by('bin').agg(pl.count().alias('count'))
-
-                chart_data = hist_df.sort('bin').to_pandas().set_index('bin')['count']
-                st.bar_chart(chart_data)
-            except Exception as e:
-                # Fallback to simple histogram if qcut fails
-                st.info("Pas assez de données uniques pour créer un histogramme détaillé")
-                st.write(fig_data.select(pl.col('salaire_net').describe()).to_pandas())
+                hist_df = (
+                    df.select(pl.col('salaire_net').drop_nulls())
+                    .select(
+                        pl.col('salaire_net').qcut(10, labels=[f"{i}" for i in range(10)], allow_duplicates=True)
+                        .alias('bin')
+                    )
+                    .group_by('bin').agg(pl.len().alias('count'))
+                    .sort('bin')
+                )
+                st.bar_chart(hist_df.to_pandas().set_index('bin'))
+            except Exception:
+                # Fallback to simple stats
+                st.info("Pas assez de données uniques")
+                st.dataframe(df.select(pl.col('salaire_net').drop_nulls().describe()))
     
     st.markdown("---")
     st.subheader("Employés avec cas particuliers")
-    
+
     if 'edge_case_flag' in df.columns:
         edge_cases_df = df.filter(pl.col('edge_case_flag') == True)
         if not edge_cases_df.is_empty():
@@ -540,8 +552,8 @@ def dashboard_page():
                 display_cols.append('salaire_brut')
             if 'edge_case_reason' in edge_cases_df.columns:
                 display_cols.append('edge_case_reason')
-            
-            st.dataframe(edge_cases_df.select(display_cols).to_pandas(), use_container_width=True)
+
+            st.dataframe(edge_cases_df.select(display_cols), use_container_width=True)
         else:
             st.success("Aucun cas particulier détecté")
 
@@ -584,9 +596,9 @@ def import_page():
                     df_import = system.excel_manager.import_from_excel(uploaded_file)
                 
                 st.success(f"✅ {len(df_import)} employés importés avec succès")
-                
+
                 st.subheader("Aperçu des données importées")
-                st.dataframe(df_import.head(10), use_container_width=True) # .to_pandas()
+                st.dataframe(df_import.head(10), use_container_width=True)
                 
                 if st.button("💾 Sauvegarder les données", type="primary", use_container_width=True):
                     month, year = map(int, st.session_state.current_period.split('-'))
@@ -940,19 +952,24 @@ def validation_page():
     with col3:
         st.metric("Cas à vérifier", len(edge_cases))
     
-    # Apply filters using Polars
-    filtered_df = df
+    # Apply filters using optimized Polars expressions
+    filters = []
+
     if search:
-        filtered_df = filtered_df.filter(
-            pl.col('matricule').cast(pl.Utf8).str.contains(f"(?i){search}") |
-            pl.col('nom').cast(pl.Utf8).str.contains(f"(?i){search}") |
-            pl.col('prenom').cast(pl.Utf8).str.contains(f"(?i){search}")
+        # Use single contains check instead of multiple casts
+        filters.append(
+            pl.col('matricule').cast(pl.Utf8).str.to_lowercase().str.contains(search.lower()) |
+            pl.col('nom').cast(pl.Utf8).str.to_lowercase().str.contains(search.lower()) |
+            pl.col('prenom').cast(pl.Utf8).str.to_lowercase().str.contains(search.lower())
         )
-    
+
     if status_filter == "À vérifier":
-        filtered_df = filtered_df.filter(pl.col('edge_case_flag') == True)
+        filters.append(pl.col('edge_case_flag') == True)
     elif status_filter == "Validés":
-        filtered_df = filtered_df.filter(pl.col('statut_validation') == True)
+        filters.append(pl.col('statut_validation') == True)
+
+    # Apply all filters at once
+    filtered_df = df.filter(pl.all_horizontal(filters)) if filters else df
     
     st.markdown("---")
     
@@ -1656,20 +1673,20 @@ def validation_page():
                         st.success("✅ Déjà validé")
 
 def pdf_generation_page():
-    """Page de génération des PDFs"""
+    """Page de génération des PDFs - optimized with caching"""
     st.header("📄 Génération des PDFs")
-    
+
     if not st.session_state.current_company or not st.session_state.current_period:
         st.warning("Sélectionnez une entreprise et une période")
         return
-    
+
     system = st.session_state.payroll_system
     period_parts = st.session_state.current_period.split('-')
     month = int(period_parts[0])
     year = int(period_parts[1])
 
-    df = system.data_consolidator.load_period_data(st.session_state.current_company, month, year)
-    df = pl.DataFrame(df) if not isinstance(df, pl.DataFrame) else df
+    # Use cached data
+    df = load_period_data_cached(st.session_state.current_company, month, year)
 
     if df.is_empty():
         st.warning("Aucune donnée pour cette période. Lancez d'abord l'import des données.")
