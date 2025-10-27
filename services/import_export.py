@@ -175,6 +175,8 @@ class ExcelImportExport:
         "Nom": "nom",
         "Prénom": "prenom",
         "Prenom": "prenom",  # No accent variant
+        "Sexe": "sexe",
+        "Genre": "sexe",  # Alternative name
         "Base heures": "base_heures",
         "Heures congés payés": "heures_conges_payes",
         "Heures conges payes": "heures_conges_payes",  # No accent variant
@@ -437,6 +439,7 @@ class ExcelImportExport:
             'Matricule': ['S000001', 'S000002'],
             'Nom': ['EXEMPLE', 'TEST'],
             'Prénom': ['Jean', 'Marie'],
+            'Sexe': ['H', 'F'],
             'Email': ['jean.exemple@email.com', 'marie.test@email.com'],
             'Salaire de base': [3500.00, 4200.00],
             'Base heures': [169, 169],

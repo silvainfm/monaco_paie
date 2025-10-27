@@ -1966,11 +1966,67 @@ def pdf_generation_page():
                 )
     
     with tab5:
-        st.info("📈 Générer le rapport des charges sociales"
-                    )
-        
+        st.info("📈 Générer l'état des charges sociales")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Employés", len(df))
+        with col2:
+            total_charges_sal = df.select(pl.col('total_charges_salariales').sum()).item() if 'total_charges_salariales' in df.columns else 0
+            total_charges_pat = df.select(pl.col('total_charges_patronales').sum()).item() if 'total_charges_patronales' in df.columns else 0
+            st.metric("Charges totales", f"{(total_charges_sal + total_charges_pat):,.2f} €")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            if st.button("📊 Générer état charges sociales", type="primary", use_container_width=True):
+                try:
+                    with st.spinner("Génération de l'état des charges sociales..."):
+                        # Clean data for PDF
+                        cleaned_data = []
+                        for row in df.iter_rows(named=True):
+                            cleaned_data.append(clean_employee_data_for_pdf(row))
+
+                        # Generate PDF
+                        pdf_buffer = pdf_service.generate_charges_sociales_pdf(
+                            cleaned_data,
+                            f"{month:02d}-{year}"
+                        )
+
+                        # Store in session state
+                        st.session_state.generated_pdfs[pdf_key]['charges_sociales'] = {
+                            'buffer': pdf_buffer.getvalue(),
+                            'filename': f"charges_sociales_{st.session_state.current_company}_{year}_{month:02d}.pdf",
+                            'generated_at': datetime.now()
+                        }
+
+                        st.success("✅ État des charges sociales généré avec succès!")
+                        st.rerun()
+
+                except Exception as e:
+                    st.error(f"Erreur lors de la génération: {str(e)}")
+
+        with col2:
+            # Check if charges sociales PDF exists in session state
+            if 'charges_sociales' in st.session_state.generated_pdfs[pdf_key]:
+                pdf_data = st.session_state.generated_pdfs[pdf_key]['charges_sociales']
+                st.download_button(
+                    label="💾 Télécharger état charges sociales",
+                    data=pdf_data['buffer'],
+                    file_name=pdf_data['filename'],
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+
         st.markdown("""
-        **Informations sur le rapport des charges sociales:**""")
+        **À propos de l'état des charges sociales:**
+
+        - Agrégation de toutes les charges par code
+        - Répartition salariales / patronales
+        - Décompte des employés par charge
+        - Calcul des bases cotisées
+        - Format réglementaire Monaco
+        """)
         
     # Add some helpful information at the bottom
     st.markdown("---")

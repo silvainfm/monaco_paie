@@ -86,6 +86,7 @@ class DataManager:
                 matricule VARCHAR,
                 nom VARCHAR,
                 prenom VARCHAR,
+                sexe VARCHAR,
                 email VARCHAR,
                 ccss_number VARCHAR,
                 date_entree DATE,
