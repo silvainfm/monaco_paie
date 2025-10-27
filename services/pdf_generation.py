@@ -607,7 +607,19 @@ class PaystubPDFGenerator:
             "",
             PDFStyles.format_currency(employee_data.get('total_charges_patronales', 0))
         ])
-        
+
+        # Prime non cotisable (added AFTER charges, exempt from social contributions)
+        if employee_data.get('prime_non_cotisable', 0) > 0:
+            data.append([
+                f"{self.RUBRIC_CODES['prime_non_cotisable']} Prime non cotisable",
+                "",
+                "",
+                PDFStyles.format_currency(employee_data.get('prime_non_cotisable', 0)),
+                "",
+                "",
+                ""
+            ])
+
         # NET row
         net_row = len(data)
         data.append([
@@ -1392,8 +1404,8 @@ class PayJournalPDFGenerator:
         
         # Salaires bruts (débit)
         total_salaires = sum(emp.get('salaire_base', 0) for emp in employees_data)
-        total_primes = sum(emp.get('prime', 0) for emp in employees_data)
-        
+        total_primes = sum(emp.get('prime', 0) + emp.get('prime_non_cotisable', 0) for emp in employees_data)
+
         data.append([
             "641100",
             date_str,
@@ -1401,7 +1413,7 @@ class PayJournalPDFGenerator:
             PDFStyles.format_currency(total_salaires),
             ""
         ])
-        
+
         if total_primes > 0:
             data.append([
                 "641300",
@@ -1485,13 +1497,14 @@ class PayJournalPDFGenerator:
         
         for emp in employees_data:
             total_hs = emp.get('montant_hs_125', 0) + emp.get('montant_hs_150', 0)
-            
+            total_primes = emp.get('prime', 0) + emp.get('prime_non_cotisable', 0)
+
             data.append([
                 emp.get('matricule', ''),
                 f"{emp.get('nom', '')} {emp.get('prenom', '')}",
                 PDFStyles.format_currency(emp.get('salaire_base', 0)),
                 PDFStyles.format_currency(total_hs),
-                PDFStyles.format_currency(emp.get('prime', 0)),
+                PDFStyles.format_currency(total_primes),
                 PDFStyles.format_currency(emp.get('salaire_brut', 0)),
                 PDFStyles.format_currency(emp.get('total_charges_salariales', 0)),
                 PDFStyles.format_currency(emp.get('salaire_net', 0)),
@@ -1503,9 +1516,9 @@ class PayJournalPDFGenerator:
             "TOTAUX",
             "",
             PDFStyles.format_currency(sum(emp.get('salaire_base', 0) for emp in employees_data)),
-            PDFStyles.format_currency(sum(emp.get('montant_hs_125', 0) + emp.get('montant_hs_150', 0) 
+            PDFStyles.format_currency(sum(emp.get('montant_hs_125', 0) + emp.get('montant_hs_150', 0)
                                          for emp in employees_data)),
-            PDFStyles.format_currency(sum(emp.get('prime', 0) for emp in employees_data)),
+            PDFStyles.format_currency(sum(emp.get('prime', 0) + emp.get('prime_non_cotisable', 0) for emp in employees_data)),
             PDFStyles.format_currency(sum(emp.get('salaire_brut', 0) for emp in employees_data)),
             PDFStyles.format_currency(sum(emp.get('total_charges_salariales', 0) for emp in employees_data)),
             PDFStyles.format_currency(sum(emp.get('salaire_net', 0) for emp in employees_data)),

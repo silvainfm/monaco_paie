@@ -484,6 +484,7 @@ class CalculateurPaieMonaco:
         type_absence = employee_data.get('type_absence', 'non_payee')
         prime = employee_data.get('prime', 0)
         type_prime = employee_data.get('type_prime', 'performance')
+        prime_non_cotisable = employee_data.get('prime_non_cotisable', 0)
         heures_jours_feries = employee_data.get('heures_jours_feries', 0)
         heures_dimanche = employee_data.get('heures_dimanche', 0)
         tickets_restaurant = employee_data.get('tickets_restaurant', 0)
@@ -535,12 +536,12 @@ class CalculateurPaieMonaco:
         
         # Ajout de la retenue tickets restaurant
         charges_sal += tickets_details.get('part_salariale', 0)
-        
-        # Salaire net
-        salaire_net = salaire_brut - charges_sal
-        
-        # Coût total employeur
-        cout_total = salaire_brut + charges_pat + tickets_details.get('part_patronale', 0)
+
+        # Salaire net (brut - charges + prime non cotisable)
+        salaire_net = salaire_brut - charges_sal + prime_non_cotisable
+
+        # Coût total employeur (includes prime_non_cotisable as it's paid by employer)
+        cout_total = salaire_brut + charges_pat + tickets_details.get('part_patronale', 0) + prime_non_cotisable
         
         return {
             'matricule': employee_data.get('matricule'),
@@ -575,6 +576,7 @@ class CalculateurPaieMonaco:
             # Primes et avantages
             'prime': prime,
             'type_prime': type_prime,
+            'prime_non_cotisable': prime_non_cotisable,
             'avantages_nature': total_avantages_nature,
             
             # Tickets restaurant
