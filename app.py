@@ -315,14 +315,14 @@ if 'authenticated' not in st.session_state:
     st.session_state.polars_mode = True
 
 # Cached data loading functions
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=300, show_spinner=False)
 def load_companies_cached():
     """Cache companies list for 5 minutes"""
     return list(DataManager.get_companies_list())
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=60, show_spinner=False)
 def load_period_data_cached(company_id: str, month: int, year: int):
-    """Cache period data for 1 minute"""
+    """Cache period data for 1 minute - returns Polars DataFrame"""
     return DataManager.load_period_data(company_id, month, year) 
 
 def require_login():
@@ -517,9 +517,9 @@ def dashboard_page():
     with col1:
         st.subheader("Répartition par statut")
         if 'statut_validation' in df.columns:
-            # Use Polars directly without pandas conversion
+            # Streamlit supports Polars DataFrames natively (no .to_pandas() needed)
             status_counts = df.group_by('statut_validation').agg(pl.count().alias('count'))
-            st.bar_chart(status_counts.to_pandas().set_index('statut_validation'))
+            st.bar_chart(status_counts, x='statut_validation', y='count')
     
     with col2:
         st.subheader("Distribution des salaires nets")
@@ -535,7 +535,8 @@ def dashboard_page():
                     .group_by('bin').agg(pl.len().alias('count'))
                     .sort('bin')
                 )
-                st.bar_chart(hist_df.to_pandas().set_index('bin'))
+                # Streamlit supports Polars DataFrames natively
+                st.bar_chart(hist_df, x='bin', y='count')
             except Exception:
                 # Fallback to simple stats
                 st.info("Pas assez de données uniques")
