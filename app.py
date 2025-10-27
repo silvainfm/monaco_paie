@@ -603,8 +603,8 @@ def import_page():
                 
                 if st.button("💾 Sauvegarder les données", type="primary", use_container_width=True):
                     month, year = map(int, st.session_state.current_period.split('-'))
-                    
-                    system.data_consolidator.save_period_data(
+
+                    DataManager.save_period_data(
                         df_import,
                         st.session_state.current_company,
                         month,
@@ -707,7 +707,7 @@ def processing_page():
                     st.session_state.processed_data = modified_df
 
                     # Save modified data
-                    system.data_consolidator.save_period_data(
+                    DataManager.save_period_data(
                         modified_df,
                         st.session_state.current_company,
                         month,
@@ -1620,9 +1620,9 @@ def validation_page():
                             # Update session state with modified dataframe
                             st.session_state.processed_data = df
 
-                            # Save to consolidated data
+                            # Save to DuckDB
                             month, year = map(int, st.session_state.current_period.split('-'))
-                            st.session_state.payroll_system.data_consolidator.save_period_data(
+                            DataManager.save_period_data(
                                 df, st.session_state.current_company, month, year
                             )
 
@@ -1660,9 +1660,9 @@ def validation_page():
                                 if ec['matricule'] != matricule
                             ]
                             
-                            # Save
+                            # Save to DuckDB
                             month, year = map(int, st.session_state.current_period.split('-'))
-                            st.session_state.payroll_system.data_consolidator.save_period_data(
+                            DataManager.save_period_data(
                                 df, st.session_state.current_company, month, year
                             )
 
@@ -2001,8 +2001,8 @@ def export_page():
     
     system = st.session_state.payroll_system
     month, year = map(int, st.session_state.current_period.split('-'))
-    
-    df = system.data_consolidator.load_period_data(st.session_state.current_company, month, year)
+
+    df = DataManager.load_period_data(st.session_state.current_company, month, year)
     
     if df.is_empty():
         st.warning("Aucune donnée à exporter. Lancez d'abord le traitement des paies.")

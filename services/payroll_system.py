@@ -19,6 +19,7 @@ from services.payroll_calculations import (
     GestionnaireCongesPayes
 )
 from services.import_export import ExcelImportExport, DataConsolidation
+from services.data_mgt import DataManager
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,7 @@ class IntegratedPayrollSystem:
 
         try:
             month, year = map(int, period.split('-'))
-            df = self.data_consolidator.load_period_data(company_id, month, year)
+            df = DataManager.load_period_data(company_id, month, year)
 
             if df.is_empty():
                 report['error'] = "Aucune donnée trouvée pour cette période"
@@ -116,7 +117,7 @@ class IntegratedPayrollSystem:
                 processed_data.append(payslip)
 
             processed_df = pl.DataFrame(processed_data)
-            self.data_consolidator.save_period_data(processed_df, company_id, month, year)
+            DataManager.save_period_data(processed_df, company_id, month, year)
 
             report['steps'].append({
                 'step': 'Calcul des paies',

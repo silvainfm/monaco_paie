@@ -26,6 +26,7 @@ import traceback
 # Import main payroll system components
 from services.payroll_calculations import CalculateurPaieMonaco, ValidateurPaieMonaco
 from services.import_export import ExcelImportExport, DataConsolidation
+from services.data_mgt import DataManager
 from services.pdf_generation import PDFGeneratorService
 from services.email_archive import create_email_distribution_system
 
@@ -296,7 +297,7 @@ class PayrollScheduler:
             
             # Load company data
             year, month = now.year, now.month
-            df = data_consolidator.load_period_data(company_id, year, month)
+            df = DataManager.load_period_data(company_id, month, year)
             
             if df.empty:
                 raise Exception(f"No data found for {company_id} period {period}")
@@ -319,7 +320,7 @@ class PayrollScheduler:
             
             # Save processed data
             processed_df = pl.DataFrame(processed_data)
-            data_consolidator.save_period_data(processed_df, company_id, year, month)
+            DataManager.save_period_data(processed_df, company_id, month, year)
             
             # Generate PDFs
             if job.params.get('generate_reports', True):
@@ -521,9 +522,8 @@ class PayrollScheduler:
             company_id = job.params['company_id']
             period = job.params['period']
             year, month = map(int, period.split('-'))
-            
-            data_consolidator = DataConsolidation()
-            df = data_consolidator.load_period_data(company_id, year, month)
+
+            df = DataManager.load_period_data(company_id, month, year)
             
             if df.empty:
                 raise Exception(f"No data found for email job")
