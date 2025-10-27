@@ -2479,18 +2479,22 @@ def dsm_declaration_page():
                 with st.form("quick_employer_config"):
                     new_employer_number = st.text_input(
                         "Numéro d'employeur Monaco",
-                        help="Numéro d'enregistrement auprès des Caisses Sociales de Monaco"
+                        help="Numéro d'enregistrement auprès des Caisses Sociales de Monaco (5 chiffres requis)"
                     )
 
                     if st.form_submit_button("💾 Sauvegarder"):
                         if new_employer_number:
-                            company_info['employer_number_monaco'] = new_employer_number
-                            config_file = CONFIG_DIR / "company_info.json"
-                            with open(config_file, 'w', encoding='utf-8') as f:
-                                json.dump(company_info, f, indent=2)
-                            st.success("✅ Numéro d'employeur sauvegardé!")
-                            time.sleep(1)
-                            st.rerun()
+                            # Validate employer number is 5 digits
+                            if not new_employer_number.isdigit() or len(new_employer_number) != 5:
+                                st.error("Le numéro d'employeur Monaco doit être exactement 5 chiffres")
+                            else:
+                                company_info['employer_number_monaco'] = new_employer_number
+                                config_file = CONFIG_DIR / "company_info.json"
+                                with open(config_file, 'w', encoding='utf-8') as f:
+                                    json.dump(company_info, f, indent=2)
+                                st.success("✅ Numéro d'employeur sauvegardé!")
+                                time.sleep(1)
+                                st.rerun()
         return
 
     # Load period data
@@ -2794,25 +2798,29 @@ def config_page():
             employer_number_monaco = st.text_input(
                 "Numéro d'employeur Monaco",
                 value=system.company_info.get('employer_number_monaco', ''),
-                help="Numéro d'enregistrement auprès des Caisses Sociales de Monaco"
+                help="Numéro d'enregistrement auprès des Caisses Sociales de Monaco (5 chiffres requis)"
             )
 
             if st.form_submit_button("💾 Sauvegarder"):
-                updated_info = {
-                    'name': name,
-                    'siret': siret,
-                    'address': address,
-                    'phone': phone,
-                    'email': email,
-                    'employer_number_monaco': employer_number_monaco
-                }
-                
-                config_file = CONFIG_DIR / "company_info.json"
-                with open(config_file, 'w', encoding='utf-8') as f:
-                    json.dump(updated_info, f, indent=2)
-                
-                system.company_info = updated_info
-                st.success("Informations mises à jour")
+                # Validate employer number is 5 digits
+                if employer_number_monaco and (not employer_number_monaco.isdigit() or len(employer_number_monaco) != 5):
+                    st.error("Le numéro d'employeur Monaco doit être exactement 5 chiffres")
+                else:
+                    updated_info = {
+                        'name': name,
+                        'siret': siret,
+                        'address': address,
+                        'phone': phone,
+                        'email': email,
+                        'employer_number_monaco': employer_number_monaco
+                    }
+
+                    config_file = CONFIG_DIR / "company_info.json"
+                    with open(config_file, 'w', encoding='utf-8') as f:
+                        json.dump(updated_info, f, indent=2)
+
+                    system.company_info = updated_info
+                    st.success("Informations mises à jour")
     
     with tab2:
         st.subheader("Gestion des utilisateurs")
