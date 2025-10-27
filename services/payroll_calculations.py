@@ -117,14 +117,45 @@ class MonacoPayrollConstants:
 
 class ChargesSocialesMonaco:
     """Calcul des charges sociales selon la législation monégasque"""
-    
-    def __init__(self, year: int = None):
-        """Initialize with rates for a specific year"""
+
+    def __init__(self, year: int = None, month: int = None):
+        """
+        Initialize with rates for a specific year and month
+
+        Args:
+            year: Year for rate calculation
+            month: Month for rate calculation (1-12). Determines which rates apply
+                   for October-effective charges (CAR, CCSS, CMRC)
+        """
         if year is None:
             year = datetime.now().year
+        if month is None:
+            month = datetime.now().month
         self.year = year
+        self.month = month
         self._load_rates_from_csv()
-    
+
+    def _get_rate_year(self, effective_date: str) -> int:
+        """
+        Determine which year's rate to use based on effective date and current month
+
+        Args:
+            effective_date: "OCTOBER" or "JANUARY"
+
+        Returns:
+            Year to use for rate lookup
+
+        Logic:
+            - OCTOBER charges (CAR, CCSS, CMRC): Change on October 1st
+              * Jan-Sep: use current year rates
+              * Oct-Dec: use next year rates
+            - JANUARY charges: Change on January 1st
+              * All months: use current year rates
+        """
+        if effective_date == "OCTOBER" and self.month >= 10:
+            return self.year + 1
+        return self.year
+
     def _load_rates_from_csv(self):
         """Load social charge rates from unified CSV file"""
         csv_path = Path("config") / "payroll_rates.csv"
@@ -159,28 +190,33 @@ class ChargesSocialesMonaco:
         if csv_path.exists():
             try:
                 df = pl.read_csv(csv_path)
-                year_col = f"taux_{self.year}"
-
-                # Vérifier la présence de la colonne pour l'année
-                if year_col not in df.columns:
-                    print(f"Avertissement : aucun taux pour l’année {self.year} dans le CSV. Utilisation des valeurs par défaut.")
-                    self.COTISATIONS_SALARIALES = default_salarial
-                    self.COTISATIONS_PATRONALES = default_patronal
-                    return
 
                 # Charges salariales
                 salarial_df = df.filter((pl.col("category") == "CHARGE") & (pl.col("type") == "SALARIAL"))
                 self.COTISATIONS_SALARIALES = {}
                 for row in salarial_df.iter_rows(named=True):
                     code = row["code"]
-                    raw_val = row.get(year_col)
-                    is_valid = raw_val is not None and not (isinstance(raw_val, float) and math.isnan(raw_val))
-                    taux = float(raw_val) if is_valid and str(raw_val) != "" else default_salarial.get(code, {}).get("taux", 0)
+                    effective_date = row.get("effective_date", "JANUARY")
+
+                    # Determine which year's rate to use
+                    rate_year = self._get_rate_year(effective_date)
+                    year_col = f"taux_{rate_year}"
+
+                    # Check if column exists
+                    if year_col not in df.columns:
+                        print(f"Avertissement : aucun taux pour l'année {rate_year} dans le CSV pour {code}. Utilisation des valeurs par défaut.")
+                        taux = default_salarial.get(code, {}).get("taux", 0)
+                    else:
+                        raw_val = row.get(year_col)
+                        is_valid = raw_val is not None and not (isinstance(raw_val, float) and math.isnan(raw_val))
+                        taux = float(raw_val) if is_valid and str(raw_val) != "" else default_salarial.get(code, {}).get("taux", 0)
+
                     plafond_val = None if row.get("plafond") == "None" else row.get("plafond")
                     self.COTISATIONS_SALARIALES[code] = {
                         "taux": taux,
                         "plafond": plafond_val,
                         "description": row.get("description"),
+                        "effective_date": effective_date
                     }
 
                 # Charges patronales
@@ -188,14 +224,27 @@ class ChargesSocialesMonaco:
                 self.COTISATIONS_PATRONALES = {}
                 for row in patronal_df.iter_rows(named=True):
                     code = row["code"]
-                    raw_val = row.get(year_col)
-                    is_valid = raw_val is not None and not (isinstance(raw_val, float) and math.isnan(raw_val))
-                    taux = float(raw_val) if is_valid and str(raw_val) != "" else default_patronal.get(code, {}).get("taux", 0)
+                    effective_date = row.get("effective_date", "JANUARY")
+
+                    # Determine which year's rate to use
+                    rate_year = self._get_rate_year(effective_date)
+                    year_col = f"taux_{rate_year}"
+
+                    # Check if column exists
+                    if year_col not in df.columns:
+                        print(f"Avertissement : aucun taux pour l'année {rate_year} dans le CSV pour {code}. Utilisation des valeurs par défaut.")
+                        taux = default_patronal.get(code, {}).get("taux", 0)
+                    else:
+                        raw_val = row.get(year_col)
+                        is_valid = raw_val is not None and not (isinstance(raw_val, float) and math.isnan(raw_val))
+                        taux = float(raw_val) if is_valid and str(raw_val) != "" else default_patronal.get(code, {}).get("taux", 0)
+
                     plafond_val = None if row.get("plafond") == "None" else row.get("plafond")
                     self.COTISATIONS_PATRONALES[code] = {
                         "taux": taux,
                         "plafond": plafond_val,
                         "description": row.get("description"),
+                        "effective_date": effective_date
                     }
 
             except Exception as e:
@@ -280,14 +329,23 @@ class ChargesSocialesMonaco:
 
 class CalculateurPaieMonaco:
     """Calculateur principal de paie pour Monaco"""
-    
-    def __init__(self, year: int = None):
-        """Initialize calculator for a specific year"""
+
+    def __init__(self, year: int = None, month: int = None):
+        """
+        Initialize calculator for a specific year and month
+
+        Args:
+            year: Year for calculations
+            month: Month for calculations (determines rate effective dates)
+        """
         if year is None:
             year = datetime.now().year
+        if month is None:
+            month = datetime.now().month
         self.year = year
+        self.month = month
         self.constants = MonacoPayrollConstants(year)
-        self.charges_calculator = ChargesSocialesMonaco(year)
+        self.charges_calculator = ChargesSocialesMonaco(year, month)
     
     def calculate_hourly_rate(self, salaire_base: float, base_heures: float = None) -> float:
         """Calculer le taux horaire"""
@@ -399,19 +457,23 @@ class CalculateurPaieMonaco:
         Returns:
             Dictionnaire avec tous les calculs de paie
         """
-        # Determine the year for rates (from processing date or payslip period)
+        # Determine the year and month for rates (from processing date or payslip period)
         if processing_date:
             calc_year = processing_date.year
-        elif 'period_year' in employee_data:
+            calc_month = processing_date.month
+        elif 'period_year' in employee_data and 'period_month' in employee_data:
             calc_year = employee_data['period_year']
+            calc_month = employee_data['period_month']
         else:
             calc_year = self.year
-        
-        # Reinitialize if year is different
-        if calc_year != self.year:
+            calc_month = self.month
+
+        # Reinitialize if year or month is different
+        if calc_year != self.year or calc_month != self.month:
             self.year = calc_year
+            self.month = calc_month
             self.constants = MonacoPayrollConstants(calc_year)
-            self.charges_calculator = ChargesSocialesMonaco(calc_year)
+            self.charges_calculator = ChargesSocialesMonaco(calc_year, calc_month)
         
         # Extraction des données
         salaire_base = employee_data.get('salaire_base', 0)

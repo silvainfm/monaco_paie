@@ -1505,7 +1505,9 @@ def validation_page():
                     st.markdown("##### ➕ Ajouter une cotisation")
 
                     # Get available charges for this employee
-                    available_charges = get_available_charges_for_employee(row)
+                    # Extract year and month from current period for rate determination
+                    month, year = map(int, st.session_state.current_period.split('-'))
+                    available_charges = get_available_charges_for_employee(row, year, month)
 
                     if available_charges:
                         # Create dropdown options

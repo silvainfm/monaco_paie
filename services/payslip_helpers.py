@@ -123,11 +123,11 @@ def get_charge_rubrics() -> Dict[str, List[Dict]]:
     }
 
 
-def get_available_charges_for_employee(employee_data: Dict, year: int = None) -> List[Dict]:
+def get_available_charges_for_employee(employee_data: Dict, year: int = None, month: int = None) -> List[Dict]:
     """Get charge codes not currently displayed for this employee"""
 
     # Initialize charges calculator
-    charges_calc = ChargesSocialesMonaco(year)
+    charges_calc = ChargesSocialesMonaco(year, month)
 
     # Get all available charge codes
     all_charges = {}
