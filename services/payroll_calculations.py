@@ -34,7 +34,7 @@ class MonacoPayrollConstants:
             'PLAFOND_SS_T1': 3428.00,
             'PLAFOND_SS_T2': 13712.00,
             'BASE_HEURES_LEGALE': 169.00,
-            'SMIC_HORAIRE': 11.65,
+            'SMIC_HORAIRE': 11.88,
             'TAUX_HS_125': 1.25,
             'TAUX_HS_150': 1.50,
             'TICKET_RESTO_VALEUR': 9.00,
@@ -98,7 +98,7 @@ class MonacoPayrollConstants:
             {'category': 'CONSTANT', 'type': '', 'code': 'BASE_HEURES_LEGALE', 'description': 'Base légale heures mensuelles',
              'plafond': '', 'taux_2024': 169.00, 'taux_2025': 169.00},
             {'category': 'CONSTANT', 'type': '', 'code': 'SMIC_HORAIRE', 'description': 'SMIC horaire Monaco',
-             'plafond': '', 'taux_2024': 11.65, 'taux_2025': 11.65},
+             'plafond': '', 'taux_2024': 11.88, 'taux_2025': 11.88},
             {'category': 'CONSTANT', 'type': '', 'code': 'TAUX_HS_125', 'description': 'Taux heures sup 125%',
              'plafond': '', 'taux_2024': 1.25, 'taux_2025': 1.25},
             {'category': 'CONSTANT', 'type': '', 'code': 'TAUX_HS_150', 'description': 'Taux heures sup 150%',
@@ -530,7 +530,15 @@ class CalculateurPaieMonaco:
             indemnite_cp -
             retenue_absence
         )
-        
+
+        # Automatic 5% bonus for employees earning between SMIC and 1.55x SMIC (exempt from charges)
+        smic_monthly = self.constants.SMIC_HORAIRE * self.constants.BASE_HEURES_LEGALE
+        smic_threshold_max = smic_monthly * 1.55
+
+        if smic_monthly <= salaire_brut <= smic_threshold_max:
+            bonus_low_wage = round(salaire_brut * 0.05, 2)
+            prime_non_cotisable += bonus_low_wage
+
         # Calcul des charges sociales
         charges_sal, charges_pat, charges_details = self.charges_calculator.calculate_total_charges(salaire_brut)
         

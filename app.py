@@ -323,7 +323,48 @@ def load_companies_cached():
 @st.cache_data(ttl=60, show_spinner=False)
 def load_period_data_cached(company_id: str, month: int, year: int):
     """Cache period data for 1 minute - returns Polars DataFrame"""
-    return DataManager.load_period_data(company_id, month, year) 
+    return DataManager.load_period_data(company_id, month, year)
+
+def get_last_n_months(month: int, year: int, n: int = 6):
+    """Calculate start and end dates for last n months including current"""
+    from datetime import datetime, timedelta
+
+    # Current period end
+    end_date = datetime(year, month, 1)
+
+    # Start period (n-1 months back)
+    start_date = end_date - timedelta(days=(n-1) * 31)
+    start_date = datetime(start_date.year, start_date.month, 1)
+
+    return start_date.year, start_date.month, end_date.year, end_date.month
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_salary_trend_data(company_id: str, month: int, year: int, n_months: int = 6):
+    """Load salary trend data for last n months - returns aggregated by period"""
+    start_year, start_month, end_year, end_month = get_last_n_months(month, year, n_months)
+
+    df = DataManager.get_period_range(company_id, start_year, start_month, end_year, end_month)
+
+    if df.is_empty():
+        return pl.DataFrame()
+
+    # Aggregate by period
+    trend = df.group_by(['period_year', 'period_month']).agg([
+        pl.col('salaire_brut').sum().alias('total_brut'),
+        pl.col('salaire_net').sum().alias('total_net'),
+        pl.col('matricule').count().alias('nb_employees')
+    ]).sort(['period_year', 'period_month'])
+
+    # Add period label for display
+    trend = trend.with_columns(
+        pl.concat_str([
+            pl.col('period_month').cast(pl.Utf8).str.zfill(2),
+            pl.lit('-'),
+            pl.col('period_year').cast(pl.Utf8)
+        ]).alias('period')
+    )
+
+    return trend
 
 def require_login():
     if st.session_state.get("auth_ok"):
@@ -509,9 +550,52 @@ def dashboard_page():
     with col4:
         validated = df.filter(pl.col('statut_validation') == True).height if 'statut_validation' in df.columns else 0
         st.markdown(metrics_style.format("VALIDÉES", f"{validated}/{len(df)}"), unsafe_allow_html=True)
-    
+
     st.markdown("---")
-    
+
+    # Salary trend over last 6 months
+    st.subheader("Évolution des salaires (6 derniers mois)")
+    trend_data = load_salary_trend_data(st.session_state.current_company, month, year, 6)
+
+    if not trend_data.is_empty() and trend_data.height > 1:
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("**Salaire Brut Total**")
+            brut_chart = trend_data.select(['period', 'total_brut'])
+            st.line_chart(brut_chart, x='period', y='total_brut')
+
+        with col2:
+            st.markdown("**Salaire Net Total**")
+            net_chart = trend_data.select(['period', 'total_net'])
+            st.line_chart(net_chart, x='period', y='total_net')
+
+        # Show month-to-month change
+        if trend_data.height >= 2:
+            latest = trend_data.row(-1, named=True)
+            previous = trend_data.row(-2, named=True)
+
+            brut_change = ((latest['total_brut'] - previous['total_brut']) / previous['total_brut'] * 100) if previous['total_brut'] > 0 else 0
+            net_change = ((latest['total_net'] - previous['total_net']) / previous['total_net'] * 100) if previous['total_net'] > 0 else 0
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric(
+                    "Variation brut (mois-à-mois)",
+                    f"{latest['total_brut']:,.0f} €",
+                    f"{brut_change:+.1f}%"
+                )
+            with col2:
+                st.metric(
+                    "Variation net (mois-à-mois)",
+                    f"{latest['total_net']:,.0f} €",
+                    f"{net_change:+.1f}%"
+                )
+    else:
+        st.info("Pas assez de données historiques pour afficher la tendance (minimum 2 mois)")
+
+    st.markdown("---")
+
     col1, col2 = st.columns(2)
     
     with col1:
@@ -2479,18 +2563,22 @@ def dsm_declaration_page():
                 with st.form("quick_employer_config"):
                     new_employer_number = st.text_input(
                         "Numéro d'employeur Monaco",
-                        help="Numéro d'enregistrement auprès des Caisses Sociales de Monaco"
+                        help="Numéro d'enregistrement auprès des Caisses Sociales de Monaco (5 chiffres requis)"
                     )
 
                     if st.form_submit_button("💾 Sauvegarder"):
                         if new_employer_number:
-                            company_info['employer_number_monaco'] = new_employer_number
-                            config_file = CONFIG_DIR / "company_info.json"
-                            with open(config_file, 'w', encoding='utf-8') as f:
-                                json.dump(company_info, f, indent=2)
-                            st.success("✅ Numéro d'employeur sauvegardé!")
-                            time.sleep(1)
-                            st.rerun()
+                            # Validate employer number is 5 digits
+                            if not new_employer_number.isdigit() or len(new_employer_number) != 5:
+                                st.error("Le numéro d'employeur Monaco doit être exactement 5 chiffres")
+                            else:
+                                company_info['employer_number_monaco'] = new_employer_number
+                                config_file = CONFIG_DIR / "company_info.json"
+                                with open(config_file, 'w', encoding='utf-8') as f:
+                                    json.dump(company_info, f, indent=2)
+                                st.success("✅ Numéro d'employeur sauvegardé!")
+                                time.sleep(1)
+                                st.rerun()
         return
 
     # Load period data
@@ -2794,25 +2882,29 @@ def config_page():
             employer_number_monaco = st.text_input(
                 "Numéro d'employeur Monaco",
                 value=system.company_info.get('employer_number_monaco', ''),
-                help="Numéro d'enregistrement auprès des Caisses Sociales de Monaco"
+                help="Numéro d'enregistrement auprès des Caisses Sociales de Monaco (5 chiffres requis)"
             )
 
             if st.form_submit_button("💾 Sauvegarder"):
-                updated_info = {
-                    'name': name,
-                    'siret': siret,
-                    'address': address,
-                    'phone': phone,
-                    'email': email,
-                    'employer_number_monaco': employer_number_monaco
-                }
-                
-                config_file = CONFIG_DIR / "company_info.json"
-                with open(config_file, 'w', encoding='utf-8') as f:
-                    json.dump(updated_info, f, indent=2)
-                
-                system.company_info = updated_info
-                st.success("Informations mises à jour")
+                # Validate employer number is 5 digits
+                if employer_number_monaco and (not employer_number_monaco.isdigit() or len(employer_number_monaco) != 5):
+                    st.error("Le numéro d'employeur Monaco doit être exactement 5 chiffres")
+                else:
+                    updated_info = {
+                        'name': name,
+                        'siret': siret,
+                        'address': address,
+                        'phone': phone,
+                        'email': email,
+                        'employer_number_monaco': employer_number_monaco
+                    }
+
+                    config_file = CONFIG_DIR / "company_info.json"
+                    with open(config_file, 'w', encoding='utf-8') as f:
+                        json.dump(updated_info, f, indent=2)
+
+                    system.company_info = updated_info
+                    st.success("Informations mises à jour")
     
     with tab2:
         st.subheader("Gestion des utilisateurs")
