@@ -1304,56 +1304,29 @@ def validation_page():
                     
                     # Create header
                     st.markdown("---")
-                    col_headers = st.columns([3, 1.5, 1.5, 2, 1.5, 2])
-                    col_headers[0].markdown("**Cotisation**")
-                    col_headers[1].markdown("**Taux Sal.**")
-                    col_headers[2].markdown("**Mont. Sal.**")
-                    col_headers[3].markdown("**Base**")
+                    col_headers = st.columns([2, 3, 1.5, 1.5, 1.5, 2])
+                    col_headers[0].markdown("**Base**")
+                    col_headers[1].markdown("**Cotisation**")
+                    col_headers[2].markdown("**Taux Sal.**")
+                    col_headers[3].markdown("**Mont. Sal.**")
                     col_headers[4].markdown("**Taux Pat.**")
                     col_headers[5].markdown("**Mont. Pat.**")
                     st.markdown("---")
                     
                     # Display each charge line
                     for charge in charges_config:
-                        cols = st.columns([3, 1.5, 1.5, 2, 1.5, 2])
-                        
-                        # Charge name
-                        cols[0].markdown(f"**{charge['name']}**")
-                        cols[0].caption(f"Code: {charge['code']}")
-                        
+                        cols = st.columns([2, 3, 1.5, 1.5, 1.5, 2])
+
                         # Get current values
                         current_sal = charges_sal.get(charge['code'], 0)
                         current_pat = charges_pat.get(charge['code'], 0)
                         current_base = st.session_state[bases_key].get(
-                            charge['code'], 
+                            charge['code'],
                             charge['base_default']
                         )
-                        
-                        # Salarial rate (display only)
-                        if charge['has_salarial']:
-                            cols[1].markdown(f"{charge['taux_sal']:.2f}%")
-                        else:
-                            cols[1].markdown("-")
-                        
-                        # Salarial amount (editable)
-                        if charge['has_salarial']:
-                            new_sal = cols[2].number_input(
-                                "Sal",
-                                value=float(current_sal),
-                                step=1.0,
-                                format="%.2f",
-                                key=f"charge_sal_{unique_key}_{charge['code']}",
-                                label_visibility="collapsed"
-                            )
-                            if abs(new_sal - current_sal) > 0.01:
-                                if 'charges_salariales' not in st.session_state[mod_key]:
-                                    st.session_state[mod_key]['charges_salariales'] = {}
-                                st.session_state[mod_key]['charges_salariales'][charge['code']] = new_sal
-                        else:
-                            cols[2].markdown("-")
-                        
+
                         # Base (editable, shared between salarial and patronal)
-                        new_base = cols[3].number_input(
+                        new_base = cols[0].number_input(
                             "Base",
                             value=float(current_base),
                             step=100.0,
@@ -1367,13 +1340,40 @@ def validation_page():
                             if 'charge_bases' not in st.session_state[mod_key]:
                                 st.session_state[mod_key]['charge_bases'] = {}
                             st.session_state[mod_key]['charge_bases'][charge['code']] = new_base
-                        
+
+                        # Charge name
+                        cols[1].markdown(f"**{charge['name']}**")
+                        cols[1].caption(f"Code: {charge['code']}")
+
+                        # Salarial rate (display only)
+                        if charge['has_salarial']:
+                            cols[2].markdown(f"{charge['taux_sal']:.2f}%")
+                        else:
+                            cols[2].markdown("-")
+
+                        # Salarial amount (editable)
+                        if charge['has_salarial']:
+                            new_sal = cols[3].number_input(
+                                "Sal",
+                                value=float(current_sal),
+                                step=1.0,
+                                format="%.2f",
+                                key=f"charge_sal_{unique_key}_{charge['code']}",
+                                label_visibility="collapsed"
+                            )
+                            if abs(new_sal - current_sal) > 0.01:
+                                if 'charges_salariales' not in st.session_state[mod_key]:
+                                    st.session_state[mod_key]['charges_salariales'] = {}
+                                st.session_state[mod_key]['charges_salariales'][charge['code']] = new_sal
+                        else:
+                            cols[3].markdown("-")
+
                         # Patronal rate (display only)
                         if charge['has_patronal']:
                             cols[4].markdown(f"{charge['taux_pat']:.2f}%")
                         else:
                             cols[4].markdown("-")
-                        
+
                         # Patronal amount (editable)
                         if charge['has_patronal']:
                             new_pat = cols[5].number_input(
@@ -1393,26 +1393,26 @@ def validation_page():
                     
                     # Totals row
                     st.markdown("---")
-                    total_cols = st.columns([3, 1.5, 1.5, 2, 1.5, 2])
-                    total_cols[0].markdown("**TOTAL**")
-                    
+                    total_cols = st.columns([2, 3, 1.5, 1.5, 1.5, 2])
+                    total_cols[1].markdown("**TOTAL**")
+
                     # Calculate totals from modified values
                     total_sal = sum(
                         st.session_state[mod_key].get('charges_salariales', {}).get(
-                            c['code'], 
+                            c['code'],
                             charges_sal.get(c['code'], 0)
                         )
                         for c in charges_config if c['has_salarial']
                     )
                     total_pat = sum(
                         st.session_state[mod_key].get('charges_patronales', {}).get(
-                            c['code'], 
+                            c['code'],
                             charges_pat.get(c['code'], 0)
                         )
                         for c in charges_config if c['has_patronal']
                     )
-                    
-                    total_cols[2].markdown(f"**{total_sal:.2f}€**")
+
+                    total_cols[3].markdown(f"**{total_sal:.2f}€**")
                     total_cols[5].markdown(f"**{total_pat:.2f}€**")
 
                     # Initialize additional charges storage
