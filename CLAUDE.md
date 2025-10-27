@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Monaco Payroll System - A comprehensive payroll management application for Monaco-based accounting firms. Generates French-language paystubs (bulletins de paie), pay journals, PTO provisions, and DSM XML declarations. Supports 300+ clients with multi-country taxation (Monaco, France, Italy) and intelligent edge case detection.
+Monaco Payroll System - A comprehensive payroll management application (in French) for Monaco-based accounting firms. Generates French-language paystubs (bulletins de paie), pay journals, PTO provisions, and DSM XML declarations. Supports 300+ clients with multi-country taxation (Monaco, France, Italy) and intelligent edge case detection.
 
 **Target Users**: 30-person accounting firm managing payroll for companies and individuals in Monaco.
 
@@ -44,17 +44,7 @@ The application uses a **layered architecture** with 12 specialized services in 
   - `HistoricalTrend`: Statistical analysis (avg, std dev, volatility) to flag anomalies
   - Auto-corrects with >0.85 confidence, flags for manual review otherwise
 
-**Communication**:
-- `email_archive.py` - Email distribution with compliance audit trail
-- `oauth2_integration.py` - Office 365 OAuth2 for secure email sending
-
-**Cross-Border & I/O**:
-- `import_export.py` - Excel I/O, cross-border taxation (France CSG/CRDS, Italy IRPEF)
-- `auth.py` - User management with bcrypt (2 roles: admin, comptable)
-
-**Supporting**:
-- `payslip_helpers.py` - UI helper functions for rubric codes and validation
-- `scheduler.py` - Job scheduling framework for automation
+And other supporting files.
 
 ### Data Flow Pipeline
 
@@ -96,12 +86,6 @@ Save to DuckDB → Generate PDFs → Send Emails → DSM XML
 **`companies` table**: id, name, siret, address, phone, email
 
 ## Monaco-Specific Context
-
-**Language**: All UI, PDFs, and user-facing text in French
-- Paystub = Bulletin de paie
-- Pay journal = Journal de paie
-- PTO = Congés payés
-- Social charges = Charges sociales
 
 **Regulatory Compliance**:
 - DSM (Déclaration Sociale Monaco): Monthly XML submission to Caisses Sociales
@@ -222,11 +206,4 @@ if st.session_state.get('role') == 'admin':
 - **Authentication**: Bcrypt (12 rounds)
 - **Email**: SMTP/OAuth2 (Office 365)
 - **Package Manager**: uv (fast pip replacement)
-
-## Future Features (README.md)
-
-Not yet implemented:
-- Automatic yearly rate/ceiling updates
-- Automated email send of DSM XML to Monaco government
-- Automated email validation workflow with clients before employee distribution
 - Regularization lines for correcting prior period errors
