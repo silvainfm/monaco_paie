@@ -1712,11 +1712,12 @@ def pdf_generation_page():
     st.subheader("Options de génération PDF")
     st.info(f"**{len(df)} employés** traités pour la période {st.session_state.current_period}")
     
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📄 Bulletin individuel", 
         "📚 Tous les bulletins", 
         "📊 Journal de paie", 
-        "💰 Provision CP"
+        "💰 Provision CP", 
+        "Charges Sociales"
     ])
     
     with tab1:
@@ -1964,6 +1965,13 @@ def pdf_generation_page():
                     use_container_width=True
                 )
     
+    with tab5:
+        st.info("📈 Générer le rapport des charges sociales"
+                    )
+        
+        st.markdown("""
+        **Informations sur le rapport des charges sociales:**""")
+        
     # Add some helpful information at the bottom
     st.markdown("---")
     
