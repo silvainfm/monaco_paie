@@ -140,6 +140,7 @@ class PaystubPDFGenerator:
         'prime_performance': '2029',
         'prime_autre': '2057',
         'jours_feries': '2065',
+        'prime_non_cotisable': '2070',
         'absence_maladie': '2985',
         'maintien_salaire': '2993',
         'absence_cp': '3211',

@@ -109,6 +109,7 @@ class DataManager:
                 retenue_absence DOUBLE,
                 prime DOUBLE,
                 type_prime VARCHAR,
+                prime_non_cotisable DOUBLE,
                 heures_sup_125 DOUBLE,
                 montant_hs_125 DOUBLE,
                 heures_sup_150 DOUBLE,
@@ -484,7 +485,7 @@ class DataManager:
         schema.update({
             col: pl.Float64 for col in ['base_heures', 'heures_payees', 'taux_horaire', 'salaire_base',
                                          'heures_conges_payes', 'jours_cp_pris', 'indemnite_cp',
-                                         'heures_absence', 'retenue_absence', 'prime', 'heures_sup_125',
+                                         'heures_absence', 'retenue_absence', 'prime', 'prime_non_cotisable', 'heures_sup_125',
                                          'montant_hs_125', 'heures_sup_150', 'montant_hs_150',
                                          'heures_jours_feries', 'montant_jours_feries', 'heures_dimanche',
                                          'tickets_restaurant', 'avantage_logement', 'avantage_transport',
