@@ -292,12 +292,16 @@ class ChargesSocialesMonaco:
         
         for key, params in cotisations.items():
             base = salaire_brut  # Par défaut, base = salaire total
-            
+
             if params['plafond'] == 'T1':
                 base = tranches['T1']
             elif params['plafond'] == 'T2':
-                base = tranches['T1'] + tranches['T2']
-            
+                # CRITICAL FIX: T2 charges with _T2 suffix apply ONLY to T2 slice, not T1+T2
+                if key.endswith('_T2'):
+                    base = tranches['T2']  # Only the T2 slice (salary between T1 and T2)
+                else:
+                    base = tranches['T1'] + tranches['T2']  # Up to T2 ceiling
+
             montant = round(base * params['taux'] / 100, 2)
             results[key] = montant
         
