@@ -272,54 +272,84 @@ class ChargesSocialesMonaco:
         
         return tranches
     
-    def calculate_cotisations(self, salaire_brut: float, 
-                            type_cotisation: str = 'salariales') -> Dict[str, float]:
+    def calculate_cotisations(self, salaire_brut: float,
+                            type_cotisation: str = 'salariales',
+                            base_overrides: Dict[str, float] = None) -> Dict[str, float]:
         """
         Calculer les cotisations sociales
-        
+
         Args:
             salaire_brut: Salaire brut mensuel
             type_cotisation: 'salariales' ou 'patronales'
-        
+            base_overrides: Dict mapping charge prefixes to custom gross salary bases
+                           e.g., {'CAR': 5000, 'ASSEDIC': 4800, 'CCSS': 4800}
+
         Returns:
             Dictionnaire des cotisations par type
         """
         tranches = self.calculate_base_tranches(salaire_brut, self.year)
-        
-        cotisations = self.COTISATIONS_SALARIALES if type_cotisation.upper() == 'SALARIALES' else self.COTISATIONS_PATRONALES
-        
-        results = {}
-        
-        for key, params in cotisations.items():
-            base = salaire_brut  # Par défaut, base = salaire total
 
-            if params['plafond'] == 'T1':
-                base = tranches['T1']
-            elif params['plafond'] == 'T2':
-                # CRITICAL FIX: T2 charges with _T2 suffix apply ONLY to T2 slice, not T1+T2
-                if key.endswith('_T2'):
-                    base = tranches['T2']  # Only the T2 slice (salary between T1 and T2)
+        cotisations = self.COTISATIONS_SALARIALES if type_cotisation.upper() == 'SALARIALES' else self.COTISATIONS_PATRONALES
+
+        results = {}
+
+        for key, params in cotisations.items():
+            # Check if custom base provided for this charge type
+            custom_base = None
+            if base_overrides:
+                for prefix, override_base in base_overrides.items():
+                    if key.startswith(prefix):
+                        custom_base = override_base
+                        break
+
+            if custom_base is not None:
+                # Recalculate tranches with custom base
+                custom_tranches = self.calculate_base_tranches(custom_base, self.year)
+
+                if params['plafond'] == 'T1':
+                    base = custom_tranches['T1']
+                elif params['plafond'] == 'T2':
+                    if key.endswith('_T2'):
+                        base = custom_tranches['T2']
+                    else:
+                        base = custom_tranches['T1'] + custom_tranches['T2']
                 else:
-                    base = tranches['T1'] + tranches['T2']  # Up to T2 ceiling
+                    base = custom_base
+            else:
+                # Use standard base calculation
+                base = salaire_brut
+
+                if params['plafond'] == 'T1':
+                    base = tranches['T1']
+                elif params['plafond'] == 'T2':
+                    # CRITICAL FIX: T2 charges with _T2 suffix apply ONLY to T2 slice, not T1+T2
+                    if key.endswith('_T2'):
+                        base = tranches['T2']  # Only the T2 slice (salary between T1 and T2)
+                    else:
+                        base = tranches['T1'] + tranches['T2']  # Up to T2 ceiling
 
             montant = round(base * params['taux'] / 100, 2)
             results[key] = montant
-        
+
         return results
     
-    def calculate_total_charges(self, salaire_brut: float) -> Tuple[float, float, Dict]:
+    def calculate_total_charges(self, salaire_brut: float, base_overrides: Dict[str, float] = None) -> Tuple[float, float, Dict]:
         """
         Calculer le total des charges salariales et patronales
-        
+
+        Args:
+            salaire_brut: Salaire brut mensuel
+            base_overrides: Dict mapping charge prefixes to custom gross salary bases
+
         Returns:
             Tuple (total_salarial, total_patronal, details)
         """
-        charges_salariales = self.calculate_cotisations(salaire_brut, 'salariales')
-        charges_patronales = self.calculate_cotisations(salaire_brut, 'patronales')
-        
+        charges_salariales = self.calculate_cotisations(salaire_brut, 'salariales', base_overrides)
+        charges_patronales = self.calculate_cotisations(salaire_brut, 'patronales', base_overrides)
+
         total_salarial = sum(charges_salariales.values())
         total_patronal = sum(charges_patronales.values())
-        
+
         details = {
             'charges_salariales': charges_salariales,
             'charges_patronales': charges_patronales,
@@ -328,7 +358,7 @@ class ChargesSocialesMonaco:
             'cout_total': salaire_brut + total_patronal,
             'year': self.year
         }
-        
+
         return total_salarial, total_patronal, details
 
 class CalculateurPaieMonaco:
@@ -495,7 +525,12 @@ class CalculateurPaieMonaco:
         avantage_logement = employee_data.get('avantage_logement', 0)
         avantage_transport = employee_data.get('avantage_transport', 0)
         jours_conges_pris = employee_data.get('jours_conges_pris', 0)
-        
+
+        # Extract new salary component fields for base calculation adjustments
+        indemnite_conges_payes = employee_data.get('indemnite_conges_payes', 0)
+        maintien_salaire_maladie = employee_data.get('maintien_salaire_maladie', 0)
+        prime_exceptionnelle = employee_data.get('prime_exceptionnelle', 0)
+
         # Calculs
         hourly_rate = self.calculate_hourly_rate(salaire_base, base_heures)
         
@@ -543,8 +578,20 @@ class CalculateurPaieMonaco:
             bonus_low_wage = round(salaire_brut * 0.05, 2)
             prime_non_cotisable += bonus_low_wage
 
+        # Calculate adjusted bases for charges with exclusions
+        base_overrides = {}
+        if maintien_salaire_maladie > 0:
+            # Exclude illness pay from Assurance Chômage and CCSS
+            base_overrides['ASSEDIC'] = salaire_brut - maintien_salaire_maladie
+            base_overrides['CCSS'] = salaire_brut - maintien_salaire_maladie
+        if indemnite_conges_payes > 0:
+            # Exclude 30% of vacation pay from CAR
+            base_overrides['CAR'] = salaire_brut - (0.3 * indemnite_conges_payes)
+
         # Calcul des charges sociales
-        charges_sal, charges_pat, charges_details = self.charges_calculator.calculate_total_charges(salaire_brut)
+        charges_sal, charges_pat, charges_details = self.charges_calculator.calculate_total_charges(
+            salaire_brut, base_overrides if base_overrides else None
+        )
         
         # Ajout de la retenue tickets restaurant
         charges_sal += tickets_details.get('part_salariale', 0)
@@ -589,6 +636,9 @@ class CalculateurPaieMonaco:
             'prime': prime,
             'type_prime': type_prime,
             'prime_non_cotisable': prime_non_cotisable,
+            'indemnite_conges_payes': indemnite_conges_payes,
+            'maintien_salaire_maladie': maintien_salaire_maladie,
+            'prime_exceptionnelle': prime_exceptionnelle,
             'avantages_nature': total_avantages_nature,
             
             # Tickets restaurant
