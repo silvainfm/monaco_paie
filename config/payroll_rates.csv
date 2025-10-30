@@ -1,26 +1,23 @@
 category,type,code,description,plafond,effective_date,taux_2024,taux_2025,taux_2026
-CONSTANT,"SALARIAL",BASE_HEURES_LEGALE,Base légale heures mensuelles,"",JANUARY,169.0,169.0,169.0
-CONSTANT,"SALARIAL",SMIC_HORAIRE,SMIC horaire Monaco,"",JANUARY,11.88,11.88,11.88
-CONSTANT,"SALARIAL",TAUX_HS_125,Taux heures sup 125%,"",JANUARY,1.25,1.25,1.25
-CONSTANT,"SALARIAL",TAUX_HS_150,Taux heures sup 150%,"",JANUARY,1.5,1.5,1.5
-CONSTANT,"",TICKET_RESTO_VALEUR,Valeur unitaire ticket restaurant,"",JANUARY,9.0,9.0,9.0
-CONSTANT,"PATRONAL",TICKET_RESTO,Part patronale ticket restaurant,"",JANUARY,0.6,0.6,0.6
-CONSTANT,"SALARIAL",TICKET_RESTO,Part salariale ticket restaurant,"",JANUARY,0.4,0.4,0.4
-CHARGE,SALARIAL,CCSS,Caisse de Compensation des Services Sociaux,9600,OCTOBER,14.75,14.75,14.75
-CHARGE,SALARIAL,RETRAITE_CAR,Retraite Caisse Autonome des Retraites,6028,JANUARY,3.15,3.15,3.15
-CHARGE,PATRONAL,RETRAITE_CAR,Retraite complémentaire Tranche 2,6028,JANUARY,8.64,8.64,8.64
+CONSTANT,"SALARIAL",BASE_HEURES_LEGALE,Base légale heures mensuelles,,JANUARY,169.0,169.0,169.0
+CONSTANT,"SALARIAL",SMIC_HORAIRE,SMIC horaire Monaco,,JANUARY,11.88,11.88,11.88
+CONSTANT,"SALARIAL",TAUX_HS_125,Taux heures sup 125%,,JANUARY,1.25,1.25,1.25
+CONSTANT,"SALARIAL",TAUX_HS_150,Taux heures sup 150%,,JANUARY,1.5,1.5,1.5
+CONSTANT,,TICKET_RESTO_VALEUR,Valeur unitaire ticket restaurant,,JANUARY,9.0,9.0,9.0
+CONSTANT,"PATRONAL",TICKET_RESTO,Part patronale ticket restaurant,,JANUARY,0.6,0.6,0.6
+CONSTANT,"SALARIAL",TICKET_RESTO,Part salariale ticket restaurant,,JANUARY,0.4,0.4,0.4
+CHARGE,SALARIAL,CCSS,Caisse de Compensation des Services Sociaux,9600,OCTOBER,13.4,13.4,13.4
+CHARGE,SALARIAL,RETRAITE_CAR,Retraite Caisse Autonome des Retraites,6112,OCTOBER,6.85,6.85,6.85
+CHARGE,PATRONAL,RETRAITE_CAR,Retraite Caisse Autonome des Retraites,6112,OCTOBER,8.33,8.33,8.33
 CHARGE,SALARIAL,CONTRIB_EQUILIBRE_TECH,Contribution équilibre technique,None,JANUARY,0.14,0.14,0.14
 CHARGE,SALARIAL,CONTRIB_EQUILIBRE_GEN_T1,Contribution équilibre général T1,T1,JANUARY,0.86,0.86,0.86
 CHARGE,SALARIAL,CONTRIB_EQUILIBRE_GEN_T2,Contribution équilibre général T2,T2,JANUARY,1.08,1.08,1.08
-CHARGE,PATRONAL,CMRC TA,Caisse Monégasque de Retraite Complémentaire,3971,OCTOBER,5.22,5.22,5.22
 CHARGE,SALARIAL,UNEDIC,Assurance chômage,15456,JANUARY,4.05,4.05,4.05
 CHARGE,PATRONAL,UNEDIC,Assurance chômage,15456,JANUARY,4.05,4.05,4.05
-CHARGE,PATRONAL,RETRAITE_COMP_T1,Retraite complémentaire Tranche 1,T1,JANUARY,4.72,4.72,4.72
-CHARGE,PATRONAL,RETRAITE_COMP_T2,Retraite complémentaire Tranche 2,T2,JANUARY,12.95,12.95,12.95
 CHARGE,PATRONAL,CONTRIB_EQUILIBRE_TECH,Contribution équilibre technique,None,JANUARY,0.21,0.21,0.21
 CHARGE,PATRONAL,CONTRIB_EQUILIBRE_GEN_T1,Contribution équilibre général T1,T1,JANUARY,1.29,1.29,1.29
 CHARGE,PATRONAL,CONTRIB_EQUILIBRE_GEN_T2,Contribution équilibre général T2,T2,JANUARY,1.62,1.62,1.62
-CHARGE,PATRONAL,PREVOYANCE,Prévoyance collective,None,JANUARY,1.50,1.50,1.50
-CHARGE,PATRONAL,CMRC TB,Caisse Monégasque de Retraite Complémentaire,31768,OCTOBER,,,
-CHARGE,SALARIAL,CMRC TA,Caisse Monégasque de Retraite Complémentaire,3971,OCTOBER,,,
-CHARGE,SALARIAL,CMRC TB,Caisse Monégasque de Retraite Complémentaire,3971,OCTOBER,,,
+CHARGE,PATRONAL,CMRC TA,Caisse Monégasque de Retraite Complémentaire,3971,OCTOBER,4.722,4.722,4.722
+CHARGE,PATRONAL,CMRC TB,Caisse Monégasque de Retraite Complémentaire,31768,OCTOBER,12.954,12.954,12.954
+CHARGE,SALARIAL,CMRC TA,Caisse Monégasque de Retraite Complémentaire,3971,OCTOBER,3.148,3.148,3.148
+CHARGE,SALARIAL,CMRC TB,Caisse Monégasque de Retraite Complémentaire,31768,OCTOBER,8.636,8.636,8.636
