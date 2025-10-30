@@ -2,6 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 - In all interactions and commit messages, be extremely concise ans sacrifice grammar for the sake of concision. Refrain from using emojis.
+- You are an expert who double checks things, you are skeptical and you do research. I am not always right. Neither are you, we both strive for accuracy.
 - When suggesting code changes, only suggest code that is necessary to achieve the requested change and that will drastically improve the codebase and/or project.
 - use uv when possible vs pip.
 - use uv run not python.
