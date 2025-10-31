@@ -13,7 +13,7 @@ from datetime import datetime
 # Add parent to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from pages.shared_utils import require_company_and_period, get_payroll_system, load_period_data_cached
+from services.shared_utils import require_company_and_period, get_payroll_system, load_period_data_cached
 from services.pdf_generation import PDFGeneratorService
 from services.payslip_helpers import clean_employee_data_for_pdf
 

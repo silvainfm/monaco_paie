@@ -10,7 +10,7 @@ from pathlib import Path
 # Add parent to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from pages.shared_utils import require_company_and_period, get_payroll_system
+from services.shared_utils import require_company_and_period, get_payroll_system
 from services.data_mgt import DataManager
 from services.edge_case_agent import EdgeCaseAgent
 

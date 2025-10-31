@@ -13,7 +13,7 @@ from pathlib import Path
 # Add parent to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from pages.shared_utils import get_payroll_system
+from services.shared_utils import get_payroll_system
 from services.auth import AuthManager
 from services.email_archive import EmailConfig, EmailConfigManager
 from services.payslip_helpers import audit_log_page

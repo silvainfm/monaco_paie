@@ -9,7 +9,7 @@ from pathlib import Path
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from pages.shared_utils import (
+from services.shared_utils import (
     require_company_and_period,
     load_period_data_cached,
     load_salary_trend_data

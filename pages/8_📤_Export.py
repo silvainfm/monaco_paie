@@ -10,7 +10,7 @@ from pathlib import Path
 # Add parent to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from pages.shared_utils import require_company_and_period
+from services.shared_utils import require_company_and_period
 from services.data_mgt import DataManager
 
 # Import send_validation_email function from Email page
