@@ -73,6 +73,42 @@ class DataManager:
                 pass
     
     @staticmethod
+    def migrate_schema():
+        """Migrate schema to add missing columns"""
+        conn = DataManager.get_connection()
+
+        try:
+            # Check which columns exist
+            existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(payroll_data)").fetchall()}
+
+            # Add missing columns
+            missing_cols = [
+                ("sexe", "VARCHAR"),
+                ("prime_non_cotisable", "DOUBLE"),
+                ("date_naissance", "DATE"),
+                ("affiliation_ac", "VARCHAR"),
+                ("affiliation_rc", "VARCHAR"),
+                ("affiliation_car", "VARCHAR"),
+                ("teletravail", "VARCHAR"),
+                ("pays_teletravail", "VARCHAR"),
+                ("administrateur_salarie", "VARCHAR"),
+                ("cp_date_debut", "DATE"),
+                ("cp_date_fin", "DATE"),
+                ("maladie_date_debut", "DATE"),
+                ("maladie_date_fin", "DATE"),
+                ("taux_prelevement_source", "DOUBLE"),
+            ]
+
+            for col_name, col_type in missing_cols:
+                if col_name not in existing_cols:
+                    conn.execute(f"ALTER TABLE payroll_data ADD COLUMN {col_name} {col_type}")
+                    logger.info(f"Added column {col_name}")
+        except Exception as e:
+            logger.warning(f"Error during migration: {e}")
+        finally:
+            DataManager.close_connection(conn)
+
+    @staticmethod
     def init_schema():
         """Initialize database schema with indexes"""
         conn = DataManager.get_connection()
@@ -127,6 +163,7 @@ class DataManager:
                 salaire_net DOUBLE,
                 cout_total_employeur DOUBLE,
                 prelevement_source DOUBLE,
+                taux_prelevement_source DOUBLE,
                 statut_validation VARCHAR,
                 edge_case_flag BOOLEAN,
                 edge_case_reason VARCHAR,
@@ -194,6 +231,9 @@ class DataManager:
             logger.info("Database schema initialized")
         finally:
             DataManager.close_connection(conn)
+
+        # Run migration to add missing columns
+        DataManager.migrate_schema()
     
     @staticmethod
     def save_period_data(df: pl.DataFrame, company_id: str, month: int, year: int):
@@ -228,8 +268,19 @@ class DataManager:
                 WHERE company_id = ? AND period_year = ? AND period_month = ?
             """, [company_id, year, month])
 
-            # Use INSERT with SELECT for better performance
-            conn.execute("INSERT INTO payroll_data SELECT * FROM df")
+            # Get database columns in order
+            db_cols = [row[1] for row in conn.execute("PRAGMA table_info(payroll_data)").fetchall()]
+
+            # Select only columns that exist in both df and db, in db order
+            select_cols = [col for col in db_cols if col in df.columns]
+
+            # Build INSERT statement with explicit column names
+            cols_str = ', '.join(select_cols)
+            placeholders = ', '.join(['?' for _ in select_cols])
+
+            # Use polars to get data in correct order and insert
+            insert_df = df.select(select_cols)
+            conn.execute(f"INSERT INTO payroll_data ({cols_str}) SELECT * FROM insert_df")
 
             logger.info(f"Saved {df.height} records for {company_id} {year}-{month:02d}")
         finally:

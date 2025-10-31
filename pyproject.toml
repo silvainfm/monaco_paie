@@ -20,6 +20,8 @@ dependencies = [
     "msal>=1.26.0",
     "authlib>=1.3.0",
     "duckdb>=0.9.0",
+    "polars>=0.20.0",
+    "fastexcel>=0.7.0",
 ]
 [project.optional-dependencies]
 dev = [

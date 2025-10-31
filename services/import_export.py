@@ -312,19 +312,64 @@ class ExcelImportExport:
                 pl.col('matricule').cast(pl.Utf8, strict=False)
             )
 
-        # Add missing columns with defaults
-        for col in cls.EXCEL_COLUMN_MAPPING.values():
+        # Add all missing database columns with defaults
+        all_db_columns = {
+            # String columns
+            'matricule': pl.Utf8, 'nom': pl.Utf8, 'prenom': pl.Utf8, 'sexe': pl.Utf8,
+            'email': pl.Utf8, 'ccss_number': pl.Utf8, 'anciennete': pl.Utf8,
+            'emploi': pl.Utf8, 'qualification': pl.Utf8, 'niveau': pl.Utf8,
+            'coefficient': pl.Utf8, 'pays_residence': pl.Utf8, 'type_absence': pl.Utf8,
+            'type_prime': pl.Utf8, 'remarques': pl.Utf8, 'statut_validation': pl.Utf8,
+            'edge_case_reason': pl.Utf8, 'affiliation_ac': pl.Utf8, 'affiliation_rc': pl.Utf8,
+            'affiliation_car': pl.Utf8, 'teletravail': pl.Utf8, 'pays_teletravail': pl.Utf8,
+            'administrateur_salarie': pl.Utf8,
+            # Numeric columns
+            'base_heures': pl.Float64, 'heures_payees': pl.Float64, 'taux_horaire': pl.Float64,
+            'salaire_base': pl.Float64, 'heures_conges_payes': pl.Float64, 'jours_cp_pris': pl.Float64,
+            'indemnite_cp': pl.Float64, 'heures_absence': pl.Float64, 'retenue_absence': pl.Float64,
+            'prime': pl.Float64, 'prime_non_cotisable': pl.Float64, 'heures_sup_125': pl.Float64,
+            'montant_hs_125': pl.Float64, 'heures_sup_150': pl.Float64, 'montant_hs_150': pl.Float64,
+            'heures_jours_feries': pl.Float64, 'montant_jours_feries': pl.Float64,
+            'heures_dimanche': pl.Float64, 'tickets_restaurant': pl.Float64,
+            'avantage_logement': pl.Float64, 'avantage_transport': pl.Float64,
+            'salaire_brut': pl.Float64, 'total_charges_salariales': pl.Float64,
+            'total_charges_patronales': pl.Float64, 'salaire_net': pl.Float64,
+            'cout_total_employeur': pl.Float64, 'prelevement_source': pl.Float64,
+            'taux_prelevement_source': pl.Float64,
+            'cumul_brut': pl.Float64, 'cumul_base_ss': pl.Float64, 'cumul_net_percu': pl.Float64,
+            'cumul_charges_sal': pl.Float64, 'cumul_charges_pat': pl.Float64,
+            'cp_acquis_n1': pl.Float64, 'cp_pris_n1': pl.Float64, 'cp_restants_n1': pl.Float64,
+            'cp_acquis_n': pl.Float64, 'cp_pris_n': pl.Float64, 'cp_restants_n': pl.Float64,
+            # Date columns
+            'date_entree': pl.Date, 'date_sortie': pl.Date, 'date_naissance': pl.Date,
+            'cp_date_debut': pl.Date, 'cp_date_fin': pl.Date,
+            'maladie_date_debut': pl.Date, 'maladie_date_fin': pl.Date,
+            # Boolean columns
+            'edge_case_flag': pl.Boolean,
+            # JSON columns (as strings)
+            'details_charges': pl.Utf8, 'tickets_restaurant_details': pl.Utf8,
+        }
+
+        for col, dtype in all_db_columns.items():
             if col not in df.columns:
-                if 'heures' in col or 'montant' in col or 'charges' in col:
+                if dtype == pl.Float64:
                     df = df.with_columns(pl.lit(0.0).alias(col))
+                elif dtype == pl.Boolean:
+                    df = df.with_columns(pl.lit(False).alias(col))
+                elif dtype == pl.Date:
+                    df = df.with_columns(pl.lit(None, dtype=pl.Date).alias(col))
                 elif col == 'pays_residence':
                     df = df.with_columns(pl.lit('MONACO').alias(col))
                 elif col == 'type_absence':
                     df = df.with_columns(pl.lit('non_payee').alias(col))
                 elif col == 'type_prime':
                     df = df.with_columns(pl.lit('performance').alias(col))
-                elif col in ['date_sortie', 'date_naissance']:
-                    df = df.with_columns(pl.lit(None, dtype=pl.Date).alias(col))
+                elif col == 'statut_validation':
+                    df = df.with_columns(pl.lit('À traiter').alias(col))
+                elif col == 'edge_case_reason':
+                    df = df.with_columns(pl.lit('').alias(col))
+                elif col in ['details_charges', 'tickets_restaurant_details']:
+                    df = df.with_columns(pl.lit(None, dtype=pl.Utf8).alias(col))
                 else:
                     df = df.with_columns(pl.lit(None, dtype=pl.Utf8).alias(col))
 
@@ -360,11 +405,11 @@ class ExcelImportExport:
                 .fill_null('MONACO')
             )
 
+        # Update default values for validation columns
         df = df.with_columns([
             pl.lit('À traiter').alias('statut_validation'),
             pl.lit(False).alias('edge_case_flag'),
-            pl.lit('').alias('edge_case_reason'),
-            pl.lit(datetime.now()).alias('date_import')
+            pl.lit('').alias('edge_case_reason')
         ])
 
         return df
