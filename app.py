@@ -196,7 +196,7 @@ def main_app():
             company_names,
             index=selected_index,
             label_visibility="collapsed",
-            key="company_selector"
+            key="sidebar_company_selector"
         )
 
         if selected_company:
@@ -224,7 +224,7 @@ def main_app():
             options=periods,
             index=current_period_idx,
             label_visibility="collapsed",
-            key="period_selector"
+            key="sidebar_period_selector"
         )
 
         st.markdown("---")
@@ -250,11 +250,11 @@ def main_app():
 
     📊 **Dashboard** - Vue d'ensemble des métriques et tendances
     📥 **Import** - Importer les données depuis Excel/CSV
-    ⚙️ **Processing** - Traiter les paies avec agent intelligent
+    ⚙️ **Traitement** - Traiter les paies avec agent intelligent
     ✅ **Validation** - Valider et modifier les bulletins
     📄 **PDF Generation** - Générer bulletins, journaux, provisions
-    📤 **Export** - Exporter les résultats vers Excel
     📧 **Email** - Envoyer les bulletins par email
+    📤 **Export** - Exporter les résultats vers Excel
     📋 **DSM** - Déclarations sociales Monaco (XML)
     ⚙️ **Config** - Configuration (admin)
     """)

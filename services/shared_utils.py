@@ -68,12 +68,17 @@ def render_sidebar():
             current_company_name = company['name'] if company else None
 
         selected_index = company_names.index(current_company_name) if current_company_name in company_names else 0
+
+        # Initialize company in session state if not present
+        if 'current_company' not in st.session_state:
+            st.session_state.current_company = companies[0]['id'] if companies else None
+
         selected_company = st.selectbox(
             "company_select",
             company_names,
             index=selected_index,
             label_visibility="collapsed",
-            key="company_selector"
+            key="sidebar_company_selector"
         )
 
         if selected_company:
@@ -96,12 +101,16 @@ def render_sidebar():
         if st.session_state.current_period and st.session_state.current_period in periods:
             current_period_idx = periods.index(st.session_state.current_period)
 
+        # Initialize period in session state if not present
+        if 'current_period' not in st.session_state:
+            st.session_state.current_period = periods[0] if periods else None
+
         st.session_state.current_period = st.selectbox(
             "period_select",
             options=periods,
             index=current_period_idx,
             label_visibility="collapsed",
-            key="period_selector"
+            key="sidebar_period_selector"
         )
 
         st.markdown("---")
@@ -122,8 +131,16 @@ def get_last_n_months(month: int, year: int, n_months: int):
 
 @st.cache_data(ttl=300)
 def load_period_data_cached(company_id: str, month: int, year: int):
-    """Cached data loading for period"""
-    return DataManager.load_period_data(company_id, month, year)
+    """Cached data loading for period - drops Object columns for Streamlit compatibility"""
+    df = DataManager.load_period_data(company_id, month, year)
+
+    # Drop Object dtype columns to avoid serialization errors in Streamlit
+    if not df.is_empty():
+        object_cols = [col for col in df.columns if df[col].dtype == pl.Object]
+        if object_cols:
+            df = df.drop(object_cols)
+
+    return df
 
 
 @st.cache_data(ttl=300)
@@ -135,6 +152,11 @@ def load_salary_trend_data(company_id: str, month: int, year: int, n_months: int
 
     if df.is_empty():
         return pl.DataFrame()
+
+    # Drop Object dtype columns before aggregation
+    object_cols = [col for col in df.columns if df[col].dtype == pl.Object]
+    if object_cols:
+        df = df.drop(object_cols)
 
     # Aggregate by period
     trend = df.group_by(['period_year', 'period_month']).agg([

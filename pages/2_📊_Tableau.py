@@ -28,7 +28,7 @@ if not require_company_and_period():
 
 month, year = map(int, st.session_state.current_period.split('-'))
 
-# Use cached data loading
+# Use cached data loading (Object columns already dropped)
 df = load_period_data_cached(st.session_state.current_company, month, year)
 
 if df.is_empty():

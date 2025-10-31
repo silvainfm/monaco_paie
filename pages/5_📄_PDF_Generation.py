@@ -13,7 +13,8 @@ from datetime import datetime
 # Add parent to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from services.shared_utils import require_company_and_period, get_payroll_system, load_period_data_cached, render_sidebar
+from services.shared_utils import require_company_and_period, get_payroll_system, render_sidebar
+from services.data_mgt import DataManager
 from services.pdf_generation import PDFGeneratorService
 from services.payslip_helpers import clean_employee_data_for_pdf
 
@@ -32,8 +33,8 @@ period_parts = st.session_state.current_period.split('-')
 month = int(period_parts[0])
 year = int(period_parts[1])
 
-# Use cached data
-df = load_period_data_cached(st.session_state.current_company, month, year)
+# Load data directly without dropping Object columns (needed for PDF generation)
+df = DataManager.load_period_data(st.session_state.current_company, month, year)
 
 if df.is_empty():
     st.warning("Aucune donnée pour cette période. Lancez d'abord l'import des données.")
