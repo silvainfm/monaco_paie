@@ -28,6 +28,90 @@ def require_company_and_period():
     return True
 
 
+@st.cache_data(ttl=600)
+def load_companies_cached():
+    """Load companies from DB (cached 10min)"""
+    try:
+        return DataManager.get_companies_list()
+    except Exception as e:
+        if "WAL" in str(e) or "Catalog Error" in str(e):
+            from pathlib import Path
+            wal_path = Path("data/payroll.duckdb.wal")
+            if wal_path.exists():
+                wal_path.unlink()
+            return DataManager.get_companies_list()
+        else:
+            raise
+
+
+def render_sidebar():
+    """Render the sidebar with company/period selection - shared across all pages"""
+    with st.sidebar:
+        st.markdown("""
+            <div style="padding: 1rem 0; border-bottom: 1px solid #e8e8e8; margin-bottom: 1.5rem;">
+                <h3 style="margin: 0; color: #2c3e50;">Paie Monégasque</h3>
+                <div style="margin-top: 0.5rem; color: #6c757d; font-size: 0.9rem;">
+                    <div>👤 {}</div>
+                    <div>🔐 {}</div>
+                </div>
+            </div>
+        """.format(st.session_state.user, st.session_state.role), unsafe_allow_html=True)
+
+        st.markdown("**Entreprise**")
+        companies = load_companies_cached()
+        company_names = [c['name'] for c in companies]
+
+        # Find current selection index
+        current_company_name = None
+        if st.session_state.current_company:
+            company = next((c for c in companies if c['id'] == st.session_state.current_company), None)
+            current_company_name = company['name'] if company else None
+
+        selected_index = company_names.index(current_company_name) if current_company_name in company_names else 0
+        selected_company = st.selectbox(
+            "company_select",
+            company_names,
+            index=selected_index,
+            label_visibility="collapsed",
+            key="company_selector"
+        )
+
+        if selected_company:
+            company = next((c for c in companies if c['name'] == selected_company), None)
+            st.session_state.current_company = company['id'] if company else None
+
+        st.markdown("**Période**")
+        # Generate last 12 months
+        periods = []
+        now = datetime.now()
+        for i in range(12):
+            month = now.month - i
+            year = now.year
+            if month <= 0:
+                month += 12
+                year -= 1
+            periods.append(f"{month:02d}-{year}")
+
+        current_period_idx = 0
+        if st.session_state.current_period and st.session_state.current_period in periods:
+            current_period_idx = periods.index(st.session_state.current_period)
+
+        st.session_state.current_period = st.selectbox(
+            "period_select",
+            options=periods,
+            index=current_period_idx,
+            label_visibility="collapsed",
+            key="period_selector"
+        )
+
+        st.markdown("---")
+
+        if st.button("Déconnexion", use_container_width=True):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+
+
 def get_last_n_months(month: int, year: int, n_months: int):
     """Get start/end year and month for last n months"""
     start_date = date(year, month, 1) - timedelta(days=30 * (n_months - 1))

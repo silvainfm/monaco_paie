@@ -10,7 +10,7 @@ from pathlib import Path
 # Add parent to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from services.shared_utils import require_company_and_period
+from services.shared_utils import require_company_and_period, render_sidebar
 from services.data_mgt import DataManager
 
 # Import send_validation_email function from Email page
@@ -22,6 +22,9 @@ except ImportError:
     HAS_EXCEL = False
 
 st.set_page_config(page_title="Export", page_icon="📤", layout="wide")
+
+# Render sidebar with company/period selection
+render_sidebar()
 
 st.header("📄 Exporter les résultats")
 

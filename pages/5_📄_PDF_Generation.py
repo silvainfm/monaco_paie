@@ -13,11 +13,14 @@ from datetime import datetime
 # Add parent to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from services.shared_utils import require_company_and_period, get_payroll_system, load_period_data_cached
+from services.shared_utils import require_company_and_period, get_payroll_system, load_period_data_cached, render_sidebar
 from services.pdf_generation import PDFGeneratorService
 from services.payslip_helpers import clean_employee_data_for_pdf
 
 st.set_page_config(page_title="PDF Generation", page_icon="📄", layout="wide")
+
+# Render sidebar with company/period selection
+render_sidebar()
 
 st.header("📄 Génération des PDFs")
 
@@ -160,7 +163,15 @@ with tab2:
                     cleaned_data = []
                     for row in df_copy.iter_rows(named=True):
                         cleaned_data.append(clean_employee_data_for_pdf(row))
-                    df_cleaned = pl.DataFrame(cleaned_data)
+
+                    # Create DataFrame with schema inference but exclude Object columns
+                    df_cleaned = pl.DataFrame(cleaned_data, infer_schema_length=1)
+
+                    # Drop any Object dtype columns that can't be serialized
+                    object_cols = [col for col in df_cleaned.columns if df_cleaned[col].dtype == pl.Object]
+                    if object_cols:
+                        df_cleaned = df_cleaned.drop(object_cols)
+
                     documents = pdf_service.generate_monthly_documents(df_cleaned, f"{month:02d}-{year}")
 
                     if 'paystubs' in documents:

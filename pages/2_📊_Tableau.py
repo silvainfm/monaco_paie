@@ -12,10 +12,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from services.shared_utils import (
     require_company_and_period,
     load_period_data_cached,
-    load_salary_trend_data
+    load_salary_trend_data,
+    render_sidebar
 )
 
-st.set_page_config(page_title="Dashboard", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Tableau de bord", page_icon="📊", layout="wide")
+
+# Render sidebar with company/period selection
+render_sidebar()
 
 st.markdown("## Tableau de bord")
 

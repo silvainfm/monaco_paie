@@ -9,10 +9,13 @@ from pathlib import Path
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from services.shared_utils import require_company_and_period, get_payroll_system
+from services.shared_utils import require_company_and_period, get_payroll_system, render_sidebar
 from services.data_mgt import DataManager
 
 st.set_page_config(page_title="Import", page_icon="📥", layout="wide")
+
+# Render sidebar with company/period selection
+render_sidebar()
 
 st.header("📥 Import des données")
 

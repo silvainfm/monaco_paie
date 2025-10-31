@@ -250,16 +250,20 @@ class DataManager:
                     pl.lit(datetime.now()).alias('last_modified')
                 ])
 
-            # Convert struct columns to JSON using cast (faster than map_elements)
+            # Convert struct columns to JSON using proper serialization
+            import json
             struct_columns = ['details_charges', 'tickets_restaurant_details']
 
             for col in struct_columns:
                 if col in df.columns:
                     # Check if column is struct/object type
                     if df[col].dtype in (pl.Struct, pl.Object) or isinstance(df[col].dtype, pl.Struct):
-                        # Use Polars native JSON serialization
+                        # Use JSON serialization to convert dict/struct to JSON string
                         df = df.with_columns(
-                            pl.col(col).cast(pl.Utf8, strict=False).alias(col)
+                            pl.col(col).map_elements(
+                                lambda x: json.dumps(x) if x is not None else None,
+                                return_dtype=pl.Utf8
+                            ).alias(col)
                         )
 
             # Delete existing period data
@@ -295,8 +299,13 @@ class DataManager:
 
         try:
             try:
+                # Cast JSON columns to VARCHAR to avoid DuckDB parsing errors on malformed JSON
                 result = conn.execute("""
-                    SELECT * FROM payroll_data
+                    SELECT
+                        * EXCLUDE (details_charges, tickets_restaurant_details),
+                        CAST(details_charges AS VARCHAR) as details_charges,
+                        CAST(tickets_restaurant_details AS VARCHAR) as tickets_restaurant_details
+                    FROM payroll_data
                     WHERE company_id = ? AND period_year = ? AND period_month = ?
                     ORDER BY matricule
                 """, [company_id, year, month]).pl()
@@ -308,6 +317,7 @@ class DataManager:
                 return DataManager.create_empty_df()
 
             # Parse JSON columns more efficiently using str.json_decode when available
+            import json
             struct_columns = ['details_charges', 'tickets_restaurant_details']
 
             for col in struct_columns:
@@ -318,11 +328,21 @@ class DataManager:
                             pl.col(col).str.json_decode().alias(col)
                         )
                     except:
-                        # Fallback for older Polars versions
+                        # Fallback: handle malformed JSON gracefully
                         try:
+                            def safe_json_parse(x):
+                                if not x or x == '':
+                                    return None
+                                try:
+                                    return json.loads(x)
+                                except (json.JSONDecodeError, ValueError):
+                                    # Malformed JSON - return None and log warning
+                                    logger.warning(f"Malformed JSON in {col}: {x[:50]}...")
+                                    return None
+
                             result = result.with_columns(
                                 pl.col(col).map_elements(
-                                    lambda x: json.loads(x) if x and x != '' else None,
+                                    safe_json_parse,
                                     return_dtype=pl.Object
                                 ).alias(col)
                             )

@@ -11,12 +11,16 @@ from datetime import datetime
 # Add parent to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from services.shared_utils import render_sidebar
 from services.data_mgt import DataManager
 from services.payroll_system import IntegratedPayrollSystem
 from services.pdf_generation import PDFGeneratorService
 from services.email_archive import create_email_distribution_system
 
 st.set_page_config(page_title="Email", page_icon="📧", layout="wide")
+
+# Render sidebar with company/period selection
+render_sidebar()
 
 
 def send_validation_email_page():

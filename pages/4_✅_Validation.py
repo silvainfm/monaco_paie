@@ -10,7 +10,7 @@ from datetime import date
 # Add parent to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from services.shared_utils import require_company_and_period
+from services.shared_utils import require_company_and_period, render_sidebar
 from services.auth import AuthManager
 from services.data_mgt import DataManager
 from services.payslip_helpers import (
@@ -24,6 +24,9 @@ from services.payslip_helpers import (
 )
 
 st.set_page_config(page_title="Validation", page_icon="✅", layout="wide")
+
+# Render sidebar with company/period selection
+render_sidebar()
 
 st.header("✅ Validation et Modification des Paies")
 
