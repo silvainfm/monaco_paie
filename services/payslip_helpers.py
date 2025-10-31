@@ -8,6 +8,7 @@ import json
 import streamlit as st
 import polars as pl
 import numpy as np
+import math
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
@@ -226,7 +227,7 @@ def recalculate_employee_payslip(employee_data: Dict, modifications: Dict) -> Di
             # Force numeric conversion
             if isinstance(value, dict):
                 updated_data[key] = 0.0
-            elif pl.is_nan(value) or value is None:
+            elif value is None: #pl.is_nan(value)
                 updated_data[key] = 0.0
             else:
                 try:
@@ -294,7 +295,9 @@ def clean_employee_data_for_pdf(employee_dict: Dict) -> Dict:
                 cleaned[key] = 0
             elif isinstance(value, (list, tuple)):
                 cleaned[key] = 0
-            elif pl.is_nan(value) or value is None:
+            elif value is None:
+                cleaned[key] = 0
+            elif isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
                 cleaned[key] = 0
             elif isinstance(value, (int, float, np.integer, np.floating)):
                 cleaned[key] = float(value)
