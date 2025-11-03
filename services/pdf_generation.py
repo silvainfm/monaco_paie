@@ -10,7 +10,7 @@ agrandir le tableau pour remplir la page
 """
 
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm, cm
 from reportlab.platypus import (
@@ -30,6 +30,7 @@ from typing import Dict, List, Optional, Tuple
 import locale
 import calendar
 import logging
+import getpass
 
 logger = logging.getLogger(__name__)
 
@@ -1241,7 +1242,18 @@ class PTOProvisionPDFGenerator:
         return Paragraph(footer_text, self.styles['CustomNormal'])
 
 class PayJournalPDFGenerator:
-    """Générateur du journal de paie format CEGID"""
+    """Générateur du journal de paie"""
+
+    # Color scheme matching paystub
+    COLORS = {
+        'primary_blue': colors.HexColor('#1e3a8a'),      # Dark blue for headers
+        'secondary_blue': colors.HexColor('#3b82f6'),    # Medium blue for accents
+        'light_blue': colors.HexColor('#dbeafe'),        # Light blue for backgrounds
+        'very_light_blue': colors.HexColor('#f0f9ff'),   # Very light blue
+        'text_dark': colors.HexColor('#1e293b'),         # Dark text
+        'text_gray': colors.HexColor('#64748b'),         # Gray text
+        'border_gray': colors.HexColor('#e2e8f0')        # Light gray for borders
+    }
 
     def __init__(self, company_info: Dict, logo_path: Optional[str] = None):
         self.company_info = company_info
@@ -1251,7 +1263,7 @@ class PayJournalPDFGenerator:
     def generate_pay_journal(self, employees_data: List[Dict],
                             period: str, output_path: Optional[str] = None) -> io.BytesIO:
         """
-        Générer le journal de paie consolidé format CEGID
+        Générer le journal de paie consolidé
 
         Args:
             employees_data: Liste des données de tous les employés
@@ -1264,8 +1276,6 @@ class PayJournalPDFGenerator:
             pdf_buffer = io.BytesIO()
 
         # Use landscape A4
-        from reportlab.lib.pagesizes import landscape
-
         doc = SimpleDocTemplate(
             pdf_buffer,
             pagesize=landscape(A4),
@@ -1295,11 +1305,11 @@ class PayJournalPDFGenerator:
         return pdf_buffer
     
     def _create_journal_header(self, period: str) -> Paragraph:
-        """Créer l'en-tête du journal format CEGID"""
+        """Créer l'en-tête du journal"""
         period_date = datetime.strptime(period, "%m-%Y")
         last_day = self._get_last_day_of_month(period_date)
 
-        # Title centered with grey background
+        # Title centered with blue color
         title_style = ParagraphStyle(
             'JournalTitle',
             parent=self.styles['CustomNormal'],
@@ -1307,7 +1317,7 @@ class PayJournalPDFGenerator:
             fontName='Helvetica-Bold',
             alignment=TA_CENTER,
             spaceAfter=6,
-            textColor=colors.black
+            textColor=self.COLORS['primary_blue']
         )
 
         title = Paragraph("Journal de Paie", title_style)
@@ -1318,7 +1328,8 @@ class PayJournalPDFGenerator:
             parent=self.styles['CustomNormal'],
             fontSize=10,
             alignment=TA_LEFT,
-            spaceAfter=12
+            spaceAfter=12,
+            textColor=self.COLORS['text_dark']
         )
 
         company_name = self.company_info.get('name', '')
@@ -1333,7 +1344,7 @@ class PayJournalPDFGenerator:
         return KeepTogether([title, subtitle])
     
     def _generate_accounting_entries(self, employees_data: List[Dict], period: str) -> List[Dict]:
-        """Generate all accounting entries in CEGID format"""
+        """Generate all accounting entries"""
         entries = []
         line_num = 2  # Start at line 2 (after header)
         folio = 1
@@ -1680,31 +1691,39 @@ class PayJournalPDFGenerator:
         # Style the table
         style = TableStyle([
             # Header row styling
-            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+            ('BACKGROUND', (0, 0), (-1, 0), self.COLORS['primary_blue']),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, 0), 9),
-            ('BOX', (0, 0), (-1, 0), 1, colors.black),
+            ('TOPPADDING', (0, 0), (-1, 0), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
 
             # All cells
             ('FONTSIZE', (0, 1), (-1, -1), 8),
             ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('TEXTCOLOR', (0, 1), (-1, -1), self.COLORS['text_dark']),
 
             # Align numbers to right
             ('ALIGN', (6, 1), (7, -1), 'RIGHT'),
 
-            # Grid
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            # Grid with blue borders
+            ('GRID', (0, 0), (-1, -1), 0.5, self.COLORS['border_gray']),
 
             # Center folio and ligne columns
             ('ALIGN', (2, 1), (3, -1), 'CENTER'),
+
+            # Alternating row colors
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, self.COLORS['very_light_blue']]),
         ])
 
-        # Find total rows and apply bold styling
+        # Find total rows and apply bold styling with background
         for idx, entry in enumerate(entries, start=1):
             if entry.get('is_total'):
                 style.add('FONTNAME', (0, idx), (-1, idx), 'Helvetica-Bold')
                 style.add('ALIGN', (5, idx), (5, idx), 'RIGHT')
+                style.add('BACKGROUND', (0, idx), (-1, idx), self.COLORS['light_blue'])
+                style.add('TEXTCOLOR', (0, idx), (-1, idx), self.COLORS['primary_blue'])
 
         table.setStyle(style)
         return table
@@ -1712,7 +1731,6 @@ class PayJournalPDFGenerator:
     def _add_footer(self, canvas_obj, doc):
         """Add footer to each page"""
         canvas_obj.saveState()
-        from reportlab.lib.pagesizes import landscape
 
         width, height = landscape(A4)
 
@@ -1722,7 +1740,8 @@ class PayJournalPDFGenerator:
         canvas_obj.drawString(1*cm, 1*cm, footer_text)
 
         # Author
-        author = self.company_info.get('author', 'Par Olivier Sammartano')
+        username = getpass.getuser()
+        author = self.company_info.get('author', f'Par {username}')
         canvas_obj.drawString(1*cm, 0.7*cm, author)
 
         # Page number (right aligned)
@@ -1731,7 +1750,7 @@ class PayJournalPDFGenerator:
 
         # Software info
         canvas_obj.setFont('Helvetica', 7)
-        canvas_obj.drawRightString(width - 1*cm, 0.7*cm, "CEGID")
+        canvas_obj.drawRightString(width - 1*cm, 0.7*cm, "BEC")
 
         canvas_obj.restoreState()
 
@@ -1754,7 +1773,6 @@ class PayJournalPDFGenerator:
         """Get last day of month"""
         last_day = calendar.monthrange(date.year, date.month)[1]
         return datetime(date.year, date.month, last_day)
-
 
 class ChargesSocialesPDFGenerator:
     """Générateur de PDF pour l'état des charges sociales"""
