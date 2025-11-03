@@ -1009,7 +1009,7 @@ class PaystubPDFGenerator:
         return table
     
 class PTOProvisionPDFGenerator:
-    """Générateur du document de provision pour congés payés format CEGID"""
+    """Générateur du document de provision pour congés payés format"""
 
     # Color scheme matching paystub
     COLORS = {
@@ -1071,7 +1071,7 @@ class PTOProvisionPDFGenerator:
             pdf_buffer.seek(0)
 
         return pdf_buffer
-    
+
     def _create_provision_header(self, period: str) -> KeepTogether:
         """Créer l'en-tête du document format"""
         period_date = datetime.strptime(period, "%m-%Y")
@@ -1079,21 +1079,18 @@ class PTOProvisionPDFGenerator:
 
         elements = []
 
-        # Title with blue color and underline
-        title_style = ParagraphStyle(
-            'ProvisionTitle',
-            parent=self.styles['CustomNormal'],
-            fontSize=16,
-            fontName='Helvetica-Bold',
-            alignment=TA_LEFT,
-            textColor=self.COLORS['primary_blue'],
-            spaceAfter=4,
-            borderWidth=1,
-            borderColor=self.COLORS['primary_blue'],
-            borderPadding=2
-        )
-        title = Paragraph("Provision pour congés payés", title_style)
-        elements.append(title)
+        # Create title with underline using table
+        title_data = [["Provision pour congés payés"]]
+        title_table = Table(title_data, colWidths=[26*cm])
+        title_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 16),
+            ('TEXTCOLOR', (0, 0), (-1, -1), self.COLORS['primary_blue']),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('LINEBELOW', (0, 0), (-1, -1), 1.5, self.COLORS['primary_blue']),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ]))
+        elements.append(title_table)
         elements.append(Spacer(1, 0.3*cm))
 
         # Header info row
