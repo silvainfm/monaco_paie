@@ -1241,18 +1241,18 @@ class PTOProvisionPDFGenerator:
         return Paragraph(footer_text, self.styles['CustomNormal'])
 
 class PayJournalPDFGenerator:
-    """Générateur du journal de paie (récapitulatif)"""
-    
+    """Générateur du journal de paie format CEGID"""
+
     def __init__(self, company_info: Dict, logo_path: Optional[str] = None):
         self.company_info = company_info
         self.logo_path = logo_path
         self.styles = PDFStyles.get_styles()
-    
-    def generate_pay_journal(self, employees_data: List[Dict], 
+
+    def generate_pay_journal(self, employees_data: List[Dict],
                             period: str, output_path: Optional[str] = None) -> io.BytesIO:
         """
-        Générer le journal de paie consolidé
-        
+        Générer le journal de paie consolidé format CEGID
+
         Args:
             employees_data: Liste des données de tous les employés
             period: Période (format: "MM-YYYY")
@@ -1262,420 +1262,499 @@ class PayJournalPDFGenerator:
             pdf_buffer = output_path
         else:
             pdf_buffer = io.BytesIO()
-        
+
+        # Use landscape A4
+        from reportlab.lib.pagesizes import landscape
+
         doc = SimpleDocTemplate(
             pdf_buffer,
-            pagesize=A4,
+            pagesize=landscape(A4),
             rightMargin=1*cm,
             leftMargin=1*cm,
-            topMargin=1.5*cm,
-            bottomMargin=1.5*cm
+            topMargin=2*cm,
+            bottomMargin=2*cm
         )
-        
+
         story = []
-        
-        # En-tête
-        story.extend(self._create_journal_header(period))
-        
-        # Tableau des écritures comptables
-        story.append(Paragraph("<b>JOURNAL DE PAIE</b>", self.styles['CustomHeading']))
-        story.append(self._create_accounting_entries_table(employees_data, period))
+
+        # Generate accounting entries
+        entries = self._generate_accounting_entries(employees_data, period)
+
+        # Header
+        story.append(self._create_journal_header(period))
         story.append(Spacer(1, 0.5*cm))
-        
-        # Récapitulatif par salarié
-        story.append(PageBreak())
-        story.append(Paragraph("<b>RÉCAPITULATIF PAR SALARIÉ</b>", self.styles['CustomHeading']))
-        story.append(self._create_employee_summary_table(employees_data))
-        story.append(Spacer(1, 0.5*cm))
-        
-        # Synthèse des charges
-        story.append(Paragraph("<b>SYNTHÈSE DES COTISATIONS</b>", self.styles['CustomHeading']))
-        story.append(self._create_charges_summary_table(employees_data))
-        story.append(Spacer(1, 0.5*cm))
-        
-        # Totaux généraux
-        story.append(self._create_totals_summary(employees_data))
-        
-        # Pied de page
-        story.append(Spacer(1, 1*cm))
-        story.append(self._create_journal_footer(period))
-        
-        doc.build(story)
-        
+
+        # Main table with all entries
+        story.append(self._create_accounting_table(entries, period))
+
+        doc.build(story, onFirstPage=self._add_footer, onLaterPages=self._add_footer)
+
         if not output_path:
             pdf_buffer.seek(0)
-        
+
         return pdf_buffer
     
-    def _create_journal_header(self, period: str) -> List:
-        """Créer l'en-tête du journal"""
-        elements = []
-        
-        # Logo et titre
-        header_data = []
-        if self.logo_path and Path(self.logo_path).exists():
-            try:
-                logo = Image(self.logo_path, width=3*cm, height=2*cm)
-                header_data.append([logo, "JOURNAL DE PAIE", ""])
-            except:
-                header_data.append(["", "JOURNAL DE PAIE", ""])
-        else:
-            header_data.append(["", "JOURNAL DE PAIE", ""])
-        
-        header_table = Table(header_data, colWidths=[5*cm, 8*cm, 5*cm])
-        header_table.setStyle(TableStyle([
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (1, 0), (1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (1, 0), (1, 0), 16),
-        ]))
-        
-        elements.append(header_table)
-        
-        # Informations de période et entreprise
+    def _create_journal_header(self, period: str) -> Paragraph:
+        """Créer l'en-tête du journal format CEGID"""
         period_date = datetime.strptime(period, "%m-%Y")
-        info_data = [
-            [f"Entreprise: {self.company_info.get('name', '')}", 
-             f"Période: {period_date.strftime('%B %Y')}"],
-            [f"SIRET: {self.company_info.get('siret', '')}", 
-             f"Date d'édition: {datetime.now().strftime('%d/%m/%Y')}"]
-        ]
-        
-        info_table = Table(info_data, colWidths=[9*cm, 9*cm])
-        info_table.setStyle(TableStyle([
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-            ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
-        ]))
-        
-        elements.append(Spacer(1, 0.5*cm))
-        elements.append(info_table)
-        elements.append(Spacer(1, 0.5*cm))
-        
-        return elements
+        last_day = self._get_last_day_of_month(period_date)
+
+        # Title centered with grey background
+        title_style = ParagraphStyle(
+            'JournalTitle',
+            parent=self.styles['CustomNormal'],
+            fontSize=14,
+            fontName='Helvetica-Bold',
+            alignment=TA_CENTER,
+            spaceAfter=6,
+            textColor=colors.black
+        )
+
+        title = Paragraph("Journal de Paie", title_style)
+
+        # Subtitle with journal info
+        subtitle_style = ParagraphStyle(
+            'JournalSubtitle',
+            parent=self.styles['CustomNormal'],
+            fontSize=10,
+            alignment=TA_LEFT,
+            spaceAfter=12
+        )
+
+        company_name = self.company_info.get('name', '')
+        journal_num = self.company_info.get('journal_number', '763')  # Default from example
+        date_str = f"{last_day.day} {self._get_french_month(last_day.month)} {last_day.year}"
+
+        subtitle = Paragraph(
+            f"Journal de Paie : {journal_num}     {company_name}     en date du : {date_str}",
+            subtitle_style
+        )
+
+        return KeepTogether([title, subtitle])
     
-    def _create_accounting_entries_table(self, employees_data: List[Dict], period: str) -> Table:
-        """Créer le tableau des écritures comptables"""
-        
-        # En-têtes
-        data = [
-            ["Compte", "Date", "Libellé", "Débit", "Crédit"]
-        ]
-        
+    def _generate_accounting_entries(self, employees_data: List[Dict], period: str) -> List[Dict]:
+        """Generate all accounting entries in CEGID format"""
+        entries = []
+        line_num = 2  # Start at line 2 (after header)
+        folio = 1
+
         period_date = datetime.strptime(period, "%m-%Y")
         last_day = self._get_last_day_of_month(period_date)
         date_str = last_day.strftime("%d/%m/%Y")
-        
-        # Comptes de personnel (crédit)
+
+        # Employee net salaries (4210000000 - credit)
         for emp in employees_data:
-            data.append([
-                "421000",
-                date_str,
-                f"{emp.get('nom', '')} {emp.get('prenom', '')}",
-                "",
-                PDFStyles.format_currency(emp.get('salaire_net', 0))
-            ])
-        
-        # Acomptes (si applicable)
+            auxiliaire = emp.get('matricule', '').replace('M', 'S').zfill(10) if emp.get('matricule') else ''
+            entries.append({
+                'compte': '4210000000',
+                'date': date_str,
+                'folio': folio,
+                'ligne': line_num,
+                'auxiliaire': auxiliaire,
+                'libelle': f"{emp.get('nom', '')} {emp.get('prenom', '')}",
+                'debit': 0,
+                'credit': emp.get('salaire_net', 0)
+            })
+            line_num += 1
+
+        # Acomptes (4250000000 - credit)
         total_acomptes = sum(emp.get('acomptes', 0) for emp in employees_data)
         if total_acomptes > 0:
-            data.append([
-                "425000",
-                date_str,
-                "Acomptes",
-                "",
-                PDFStyles.format_currency(total_acomptes)
-            ])
-        
-        # Charges salariales
-        total_car_sal = sum(self._get_charge_amount(emp, 'salariales', 'CAR') for emp in employees_data)
-        total_ccss = sum(self._get_charge_amount(emp, 'salariales', 'CCSS') for emp in employees_data)
-        total_assedic_sal = sum(self._get_charge_amount(emp, 'salariales', 'ASSEDIC_T1') + 
-                                self._get_charge_amount(emp, 'salariales', 'ASSEDIC_T2') 
-                                for emp in employees_data)
-        
-        if total_car_sal + total_ccss > 0:
-            data.append([
-                "431100",
-                date_str,
-                "Part salariale CAR/CCSS",
-                "",
-                PDFStyles.format_currency(total_car_sal + total_ccss)
-            ])
-        
+            entries.append({
+                'compte': '4250000000',
+                'date': date_str,
+                'folio': folio,
+                'ligne': line_num,
+                'auxiliaire': '',
+                'libelle': 'Acomptes',
+                'debit': 0,
+                'credit': total_acomptes
+            })
+            line_num += 1
+
+        # Part salariale CAR/CCSS (4311000000 - credit)
+        total_car_ccss_sal = sum(
+            self._get_charge_amount(emp, 'salariales', 'CAR') +
+            self._get_charge_amount(emp, 'salariales', 'CCSS')
+            for emp in employees_data
+        )
+        if total_car_ccss_sal > 0:
+            entries.append({
+                'compte': '4311000000',
+                'date': date_str,
+                'folio': folio,
+                'ligne': line_num,
+                'auxiliaire': '',
+                'libelle': 'Part salariale CAR/CCSS',
+                'debit': 0,
+                'credit': total_car_ccss_sal
+            })
+            line_num += 1
+
+        # Part salariale ASSEDIC (4373000000 - credit)
+        total_assedic_sal = sum(
+            self._get_charge_amount(emp, 'salariales', 'ASSEDIC_T1') +
+            self._get_charge_amount(emp, 'salariales', 'ASSEDIC_T2')
+            for emp in employees_data
+        )
         if total_assedic_sal > 0:
-            data.append([
-                "437300",
-                date_str,
-                "Part salariale ASSEDIC",
-                "",
-                PDFStyles.format_currency(total_assedic_sal)
-            ])
-        
-        # Salaires bruts (débit)
-        total_salaires = sum(emp.get('salaire_base', 0) for emp in employees_data)
-        total_primes = sum(emp.get('prime', 0) + emp.get('prime_non_cotisable', 0) for emp in employees_data)
+            entries.append({
+                'compte': '4373000000',
+                'date': date_str,
+                'folio': folio,
+                'ligne': line_num,
+                'auxiliaire': '',
+                'libelle': 'Part salariale ASSEDIC',
+                'debit': 0,
+                'credit': total_assedic_sal
+            })
+            line_num += 1
 
-        data.append([
-            "641100",
-            date_str,
-            "Rémunérations brutes",
-            PDFStyles.format_currency(total_salaires),
-            ""
-        ])
+        # Part salariale prevoyance (4374100000 - credit)
+        total_prevoyance_sal = sum(
+            self._get_charge_amount(emp, 'salariales', 'PREVOYANCE')
+            for emp in employees_data
+        )
+        if total_prevoyance_sal > 0:
+            entries.append({
+                'compte': '4374100000',
+                'date': date_str,
+                'folio': folio,
+                'ligne': line_num,
+                'auxiliaire': '',
+                'libelle': 'Part salariale MMA / QUATREM',
+                'debit': 0,
+                'credit': total_prevoyance_sal
+            })
+            line_num += 1
 
+        # Rémunérations brutes (6411000000 - debit)
+        total_salaires_brut = sum(emp.get('salaire_brut', 0) for emp in employees_data)
+        total_primes = sum(emp.get('prime', 0) for emp in employees_data)
+
+        # Calculate base salary (brut minus primes)
+        total_salaires_base = total_salaires_brut - total_primes
+
+        if total_salaires_base > 0:
+            entries.append({
+                'compte': '6411000000',
+                'date': date_str,
+                'folio': folio,
+                'ligne': line_num,
+                'auxiliaire': '',
+                'libelle': 'Rémunérations brutes',
+                'debit': total_salaires_base,
+                'credit': 0
+            })
+            line_num += 1
+
+        # Primes et gratifications (6413000000 - debit)
         if total_primes > 0:
-            data.append([
-                "641300",
-                date_str,
-                "Primes et gratifications",
-                PDFStyles.format_currency(total_primes),
-                ""
-            ])
-        
-        # Charges patronales
-        total_car_pat = sum(self._get_charge_amount(emp, 'patronales', 'CAR') for emp in employees_data)
-        total_cmrc = sum(self._get_charge_amount(emp, 'patronales', 'CMRC') for emp in employees_data)
-        total_assedic_pat = sum(self._get_charge_amount(emp, 'patronales', 'ASSEDIC_T1') + 
-                                self._get_charge_amount(emp, 'patronales', 'ASSEDIC_T2') 
-                                for emp in employees_data)
-        
-        if total_car_pat > 0:
-            data.append([
-                "645101",
-                date_str,
-                "Charges patronales CAR",
-                PDFStyles.format_currency(total_car_pat),
-                ""
-            ])
-        
-        if total_cmrc > 0:
-            data.append([
-                "645312",
-                date_str,
-                "Charges patronales CMRC",
-                PDFStyles.format_currency(total_cmrc),
-                ""
-            ])
-        
-        if total_assedic_pat > 0:
-            data.append([
-                "645400",
-                date_str,
-                "Charges patronales ASSEDIC",
-                PDFStyles.format_currency(total_assedic_pat),
-                ""
-            ])
-        
-        # Totaux
-        total_debit = (total_salaires + total_primes + total_car_pat + 
-                      total_cmrc + total_assedic_pat)
-        total_credit = (sum(emp.get('salaire_net', 0) for emp in employees_data) +
-                       total_acomptes + total_car_sal + total_ccss + total_assedic_sal)
-        
-        data.append([
-            "TOTAUX",
-            "",
-            "",
-            PDFStyles.format_currency(total_debit),
-            PDFStyles.format_currency(total_credit)
-        ])
-        
-        table = Table(data, colWidths=[2.5*cm, 2.5*cm, 7*cm, 3*cm, 3*cm])
-        table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2C3E50')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 8),
-            ('ALIGN', (3, 1), (4, -1), 'RIGHT'),
-            ('GRID', (0, 0), (-1, -2), 0.5, colors.grey),
-            ('LINEBELOW', (0, -2), (-1, -2), 2, colors.black),
-            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#ECF0F1')),
-        ]))
-        
-        return table
-    
-    def _create_employee_summary_table(self, employees_data: List[Dict]) -> Table:
-        """Créer le tableau récapitulatif par salarié"""
-        
-        data = [
-            ["Matricule", "Nom Prénom", "Salaire Base", "Heures Sup", 
-             "Primes", "Brut", "Charges Sal.", "Net à payer", "Charges Pat."]
-        ]
-        
-        for emp in employees_data:
-            total_hs = emp.get('montant_hs_125', 0) + emp.get('montant_hs_150', 0)
-            total_primes = emp.get('prime', 0) + emp.get('prime_non_cotisable', 0)
+            entries.append({
+                'compte': '6413000000',
+                'date': date_str,
+                'folio': folio,
+                'ligne': line_num,
+                'auxiliaire': '',
+                'libelle': 'Primes et gratifications',
+                'debit': total_primes,
+                'credit': 0
+            })
+            line_num += 1
 
-            data.append([
-                emp.get('matricule', ''),
-                f"{emp.get('nom', '')} {emp.get('prenom', '')}",
-                PDFStyles.format_currency(emp.get('salaire_base', 0)),
-                PDFStyles.format_currency(total_hs),
-                PDFStyles.format_currency(total_primes),
-                PDFStyles.format_currency(emp.get('salaire_brut', 0)),
-                PDFStyles.format_currency(emp.get('total_charges_salariales', 0)),
-                PDFStyles.format_currency(emp.get('salaire_net', 0)),
-                PDFStyles.format_currency(emp.get('total_charges_patronales', 0))
-            ])
-        
-        # Totaux
-        data.append([
-            "TOTAUX",
-            "",
-            PDFStyles.format_currency(sum(emp.get('salaire_base', 0) for emp in employees_data)),
-            PDFStyles.format_currency(sum(emp.get('montant_hs_125', 0) + emp.get('montant_hs_150', 0)
-                                         for emp in employees_data)),
-            PDFStyles.format_currency(sum(emp.get('prime', 0) + emp.get('prime_non_cotisable', 0) for emp in employees_data)),
-            PDFStyles.format_currency(sum(emp.get('salaire_brut', 0) for emp in employees_data)),
-            PDFStyles.format_currency(sum(emp.get('total_charges_salariales', 0) for emp in employees_data)),
-            PDFStyles.format_currency(sum(emp.get('salaire_net', 0) for emp in employees_data)),
-            PDFStyles.format_currency(sum(emp.get('total_charges_patronales', 0) for emp in employees_data))
-        ])
-        
-        table = Table(data, colWidths=[2*cm, 3.5*cm, 2*cm, 2*cm, 2*cm, 2*cm, 2*cm, 2*cm, 2*cm])
-        table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3498DB')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 7),
-            ('ALIGN', (2, 1), (-1, -1), 'RIGHT'),
-            ('GRID', (0, 0), (-1, -2), 0.5, colors.grey),
-            ('LINEBELOW', (0, -2), (-1, -2), 2, colors.black),
-            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#E8F4F8')),
-        ]))
-        
-        return table
-    
-    def _create_charges_summary_table(self, employees_data: List[Dict]) -> Table:
-        """Créer le tableau de synthèse des cotisations"""
-        
-        # Calculer les totaux par type de cotisation
-        charges_summary = {}
-        
-        for emp in employees_data:
-            details = emp.get('details_charges', {})
-            
-            # Charges salariales
-            for key, value in details.get('charges_salariales', {}).items():
-                if key not in charges_summary:
-                    charges_summary[key] = {'salariale': 0, 'patronale': 0}
-                charges_summary[key]['salariale'] += value
-            
-            # Charges patronales
-            for key, value in details.get('charges_patronales', {}).items():
-                if key not in charges_summary:
-                    charges_summary[key] = {'salariale': 0, 'patronale': 0}
-                charges_summary[key]['patronale'] += value
-        
-        data = [
-            ["Cotisation", "Part Salariale", "Part Patronale", "Total"]
-        ]
-        
-        total_sal = 0
-        total_pat = 0
-        
-        for cotisation, values in sorted(charges_summary.items()):
-            sal = values['salariale']
-            pat = values['patronale']
-            total_sal += sal
-            total_pat += pat
-            
-            data.append([
-                cotisation,
-                PDFStyles.format_currency(sal),
-                PDFStyles.format_currency(pat),
-                PDFStyles.format_currency(sal + pat)
-            ])
-        
+        # Indemnité de licenciement (6414000000 - debit) if any
+        total_indem = sum(emp.get('indemnite_licenciement', 0) for emp in employees_data)
+        if total_indem > 0:
+            entries.append({
+                'compte': '6414000000',
+                'date': date_str,
+                'folio': folio,
+                'ligne': line_num,
+                'auxiliaire': '',
+                'libelle': 'Indemnité de licenciement',
+                'debit': total_indem,
+                'credit': 0
+            })
+            line_num += 1
+
+        # Mark folio 1 total
+        entries.append({
+            'compte': '',
+            'date': '',
+            'folio': '',
+            'ligne': '',
+            'auxiliaire': '',
+            'libelle': 'Total folio',
+            'debit': sum(e['debit'] for e in entries if e.get('folio') == folio),
+            'credit': sum(e['credit'] for e in entries if e.get('folio') == folio),
+            'is_total': True
+        })
+
+        # Folio 2 - Employer charges
+        folio = 2
+        line_num = 20  # Continue line numbering
+
+        # Charges patronales CAR/CCSS (4311000000 - credit)
+        total_car_ccss_pat = sum(
+            self._get_charge_amount(emp, 'patronales', 'CAR') +
+            self._get_charge_amount(emp, 'patronales', 'CCSS')
+            for emp in employees_data
+        )
+        if total_car_ccss_pat > 0:
+            entries.append({
+                'compte': '4311000000',
+                'date': date_str,
+                'folio': folio,
+                'ligne': line_num,
+                'auxiliaire': '',
+                'libelle': 'Charges patronales CAR/CCSS',
+                'debit': 0,
+                'credit': total_car_ccss_pat
+            })
+            line_num += 1
+
+        # Charges patronales ASSEDIC (4373000000 - credit)
+        total_assedic_pat = sum(
+            self._get_charge_amount(emp, 'patronales', 'ASSEDIC_T1') +
+            self._get_charge_amount(emp, 'patronales', 'ASSEDIC_T2')
+            for emp in employees_data
+        )
+        if total_assedic_pat > 0:
+            entries.append({
+                'compte': '4373000000',
+                'date': date_str,
+                'folio': folio,
+                'ligne': line_num,
+                'auxiliaire': '',
+                'libelle': 'Charges patronales ASSEDIC',
+                'debit': 0,
+                'credit': total_assedic_pat
+            })
+            line_num += 1
+
+        # Charges patronales PREVOYANCE (4374100000 - credit)
+        total_prevoyance_pat = sum(
+            self._get_charge_amount(emp, 'patronales', 'PREVOYANCE')
+            for emp in employees_data
+        )
+        if total_prevoyance_pat > 0:
+            entries.append({
+                'compte': '4374100000',
+                'date': date_str,
+                'folio': folio,
+                'ligne': line_num,
+                'auxiliaire': '',
+                'libelle': 'Charges patronales PREVOYANCE',
+                'debit': 0,
+                'credit': total_prevoyance_pat
+            })
+            line_num += 1
+
+        # Charges patronales CAR/CCSS (6451010000 - debit)
+        if total_car_ccss_pat > 0:
+            entries.append({
+                'compte': '6451010000',
+                'date': date_str,
+                'folio': folio,
+                'ligne': line_num,
+                'auxiliaire': '',
+                'libelle': 'Charges patronales CAR/CCSS',
+                'debit': total_car_ccss_pat,
+                'credit': 0
+            })
+            line_num += 1
+
+        # Charges patronales PREVOYANCE (6452100000 - debit)
+        if total_prevoyance_pat > 0:
+            entries.append({
+                'compte': '6452100000',
+                'date': date_str,
+                'folio': folio,
+                'ligne': line_num,
+                'auxiliaire': '',
+                'libelle': 'Charges patronales PREVOYANCE',
+                'debit': total_prevoyance_pat,
+                'credit': 0
+            })
+            line_num += 1
+
+        # Charges patronales CMRC (6453120000 - debit)
+        total_cmrc = sum(self._get_charge_amount(emp, 'patronales', 'CMRC') for emp in employees_data)
+        if total_cmrc > 0:
+            entries.append({
+                'compte': '6453120000',
+                'date': date_str,
+                'folio': folio,
+                'ligne': line_num,
+                'auxiliaire': '',
+                'libelle': 'Charges patronales CMRC',
+                'debit': total_cmrc,
+                'credit': 0
+            })
+            line_num += 1
+
+        # Charges patronales ASSEDIC (6454000000 - debit)
+        if total_assedic_pat > 0:
+            entries.append({
+                'compte': '6454000000',
+                'date': date_str,
+                'folio': folio,
+                'ligne': line_num,
+                'auxiliaire': '',
+                'libelle': 'Charges patronales ASSEDIC',
+                'debit': total_assedic_pat,
+                'credit': 0
+            })
+            line_num += 1
+
+        # Folio 2 total
+        folio2_debit = sum(e['debit'] for e in entries if e.get('folio') == folio)
+        folio2_credit = sum(e['credit'] for e in entries if e.get('folio') == folio)
+        entries.append({
+            'compte': '',
+            'date': '',
+            'folio': '',
+            'ligne': '',
+            'auxiliaire': '',
+            'libelle': 'Total folio',
+            'debit': folio2_debit,
+            'credit': folio2_credit,
+            'is_total': True
+        })
+
+        # Total établissement
+        total_debit = sum(e['debit'] for e in entries if not e.get('is_total'))
+        total_credit = sum(e['credit'] for e in entries if not e.get('is_total'))
+        entries.append({
+            'compte': '',
+            'date': '',
+            'folio': '',
+            'ligne': '',
+            'auxiliaire': '',
+            'libelle': 'Total établissement',
+            'debit': total_debit,
+            'credit': total_credit,
+            'is_total': True
+        })
+
         # Total général
-        data.append([
-            "TOTAL",
-            PDFStyles.format_currency(total_sal),
-            PDFStyles.format_currency(total_pat),
-            PDFStyles.format_currency(total_sal + total_pat)
+        entries.append({
+            'compte': '',
+            'date': '',
+            'folio': '',
+            'ligne': '',
+            'auxiliaire': '',
+            'libelle': 'Total général',
+            'debit': total_debit,
+            'credit': total_credit,
+            'is_total': True
+        })
+
+        return entries
+
+    def _create_accounting_table(self, entries: List[Dict], period: str) -> Table:
+        """Create the main accounting entries table"""
+        # Header row
+        data = [[
+            'Compte', 'Date', 'Folio', 'Ligne', 'Auxiliaire', 'Libelle', 'Débit', 'Crédit'
+        ]]
+
+        # Add all entries
+        for entry in entries:
+            is_total = entry.get('is_total', False)
+            data.append([
+                str(entry.get('compte', '')),
+                str(entry.get('date', '')),
+                str(entry.get('folio', '')),
+                str(entry.get('ligne', '')),
+                str(entry.get('auxiliaire', '')),
+                entry.get('libelle', ''),
+                PDFStyles.format_currency(entry['debit']) if entry['debit'] > 0 else '0,00',
+                PDFStyles.format_currency(entry['credit']) if entry['credit'] > 0 else '0,00'
+            ])
+
+        # Create table with proper column widths
+        col_widths = [2.5*cm, 2.2*cm, 1.3*cm, 1.3*cm, 2.5*cm, 7*cm, 2.5*cm, 2.5*cm]
+        table = Table(data, colWidths=col_widths, repeatRows=1)
+
+        # Style the table
+        style = TableStyle([
+            # Header row styling
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 9),
+            ('BOX', (0, 0), (-1, 0), 1, colors.black),
+
+            # All cells
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+
+            # Align numbers to right
+            ('ALIGN', (6, 1), (7, -1), 'RIGHT'),
+
+            # Grid
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+
+            # Center folio and ligne columns
+            ('ALIGN', (2, 1), (3, -1), 'CENTER'),
         ])
-        
-        table = Table(data, colWidths=[6*cm, 4*cm, 4*cm, 4*cm])
-        table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#9B59B6')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('ALIGN', (1, 1), (-1, -1), 'RIGHT'),
-            ('GRID', (0, 0), (-1, -2), 0.5, colors.grey),
-            ('LINEBELOW', (0, -2), (-1, -2), 2, colors.black),
-            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#E8DAEF')),
-        ]))
-        
+
+        # Find total rows and apply bold styling
+        for idx, entry in enumerate(entries, start=1):
+            if entry.get('is_total'):
+                style.add('FONTNAME', (0, idx), (-1, idx), 'Helvetica-Bold')
+                style.add('ALIGN', (5, idx), (5, idx), 'RIGHT')
+
+        table.setStyle(style)
         return table
-    
-    def _create_totals_summary(self, employees_data: List[Dict]) -> Table:
-        """Créer le tableau de synthèse des totaux"""
-        
-        total_brut = sum(emp.get('salaire_brut', 0) for emp in employees_data)
-        total_charges_sal = sum(emp.get('total_charges_salariales', 0) for emp in employees_data)
-        total_charges_pat = sum(emp.get('total_charges_patronales', 0) for emp in employees_data)
-        total_net = sum(emp.get('salaire_net', 0) for emp in employees_data)
-        cout_total = total_brut + total_charges_pat
-        
-        data = [
-            ["SYNTHÈSE GÉNÉRALE", ""],
-            ["Nombre de salariés", str(len(employees_data))],
-            ["Masse salariale brute", PDFStyles.format_currency(total_brut)],
-            ["Total charges salariales", PDFStyles.format_currency(total_charges_sal)],
-            ["Total charges patronales", PDFStyles.format_currency(total_charges_pat)],
-            ["Total net à payer", PDFStyles.format_currency(total_net)],
-            ["COÛT TOTAL EMPLOYEUR", PDFStyles.format_currency(cout_total)]
-        ]
-        
-        table = Table(data, colWidths=[10*cm, 6*cm])
-        table.setStyle(TableStyle([
-            ('SPAN', (0, 0), (1, 0)),
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2C3E50')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('ALIGN', (0, 1), (0, -1), 'LEFT'),
-            ('ALIGN', (1, 1), (1, -1), 'RIGHT'),
-            ('GRID', (0, 1), (-1, -2), 0.5, colors.grey),
-            ('LINEBELOW', (0, -2), (-1, -2), 2, colors.black),
-            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, -1), (-1, -1), 12),
-            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#27AE60')),
-            ('TEXTCOLOR', (0, -1), (-1, -1), colors.whitesmoke),
-        ]))
-        
-        return table
-    
+
+    def _add_footer(self, canvas_obj, doc):
+        """Add footer to each page"""
+        canvas_obj.saveState()
+        from reportlab.lib.pagesizes import landscape
+
+        width, height = landscape(A4)
+
+        # Footer text
+        canvas_obj.setFont('Helvetica', 8)
+        footer_text = f"Imprimé le {datetime.now().strftime('%d/%m/%y à %H:%M')}"
+        canvas_obj.drawString(1*cm, 1*cm, footer_text)
+
+        # Author
+        author = self.company_info.get('author', 'Par Olivier Sammartano')
+        canvas_obj.drawString(1*cm, 0.7*cm, author)
+
+        # Page number (right aligned)
+        page_text = f"Page n° {doc.page}"
+        canvas_obj.drawRightString(width - 1*cm, 1*cm, page_text)
+
+        # Software info
+        canvas_obj.setFont('Helvetica', 7)
+        canvas_obj.drawRightString(width - 1*cm, 0.7*cm, "CEGID")
+
+        canvas_obj.restoreState()
+
+    def _get_french_month(self, month_num: int) -> str:
+        """Get French month name"""
+        months = {
+            1: 'janvier', 2: 'février', 3: 'mars', 4: 'avril',
+            5: 'mai', 6: 'juin', 7: 'juillet', 8: 'août',
+            9: 'septembre', 10: 'octobre', 11: 'novembre', 12: 'décembre'
+        }
+        return months.get(month_num, '')
+
     def _get_charge_amount(self, emp: Dict, type_charge: str, key: str) -> float:
-        """Obtenir le montant d'une charge spécifique"""
+        """Get charge amount from employee data"""
         details = emp.get('details_charges', {})
         charges = details.get(f'charges_{type_charge}', {})
         return charges.get(key, 0)
-    
+
     def _get_last_day_of_month(self, date: datetime) -> datetime:
-        """Obtenir le dernier jour du mois"""
+        """Get last day of month"""
         last_day = calendar.monthrange(date.year, date.month)[1]
         return datetime(date.year, date.month, last_day)
-    
-    def _create_journal_footer(self, period: str) -> Paragraph:
-        """Créer le pied de page du journal"""
-        footer_text = f"""
-        <para align="center" fontSize="8">
-        Journal de paie - Période {period}<br/>
-        Document édité le {datetime.now().strftime("%d/%m/%Y à %H:%M")}<br/>
-        Document comptable à conserver
-        </para>
-        """
-        
-        return Paragraph(footer_text, self.styles['CustomNormal'])
+
 
 class ChargesSocialesPDFGenerator:
     """Générateur de PDF pour l'état des charges sociales"""
