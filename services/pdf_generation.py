@@ -1009,18 +1009,29 @@ class PaystubPDFGenerator:
         return table
     
 class PTOProvisionPDFGenerator:
-    """Générateur du document de provision pour congés payés"""
-    
+    """Générateur du document de provision pour congés payés format CEGID"""
+
+    # Color scheme matching paystub
+    COLORS = {
+        'primary_blue': colors.HexColor('#1e3a8a'),      # Dark blue for headers
+        'secondary_blue': colors.HexColor('#3b82f6'),    # Medium blue for accents
+        'light_blue': colors.HexColor('#dbeafe'),        # Light blue for backgrounds
+        'very_light_blue': colors.HexColor('#f0f9ff'),   # Very light blue
+        'text_dark': colors.HexColor('#1e293b'),         # Dark text
+        'text_gray': colors.HexColor('#64748b'),         # Gray text
+        'border_gray': colors.HexColor('#e2e8f0')        # Light gray for borders
+    }
+
     def __init__(self, company_info: Dict, logo_path: Optional[str] = None):
         self.company_info = company_info
         self.logo_path = logo_path
         self.styles = PDFStyles.get_styles()
     
-    def generate_pto_provision(self, provisions_data: List[Dict], 
+    def generate_pto_provision(self, provisions_data: List[Dict],
                               period: str, output_path: Optional[str] = None) -> io.BytesIO:
         """
-        Générer le document de provision pour congés payés
-        
+        Générer le document de provision pour congés payés format
+
         Args:
             provisions_data: Liste des provisions par employé
             period: Période (format: "MM-YYYY")
@@ -1030,216 +1041,307 @@ class PTOProvisionPDFGenerator:
             pdf_buffer = output_path
         else:
             pdf_buffer = io.BytesIO()
-        
+
+        # Use landscape A4
         doc = SimpleDocTemplate(
             pdf_buffer,
-            pagesize=A4,
-            rightMargin=1.5*cm,
-            leftMargin=1.5*cm,
-            topMargin=2*cm,
+            pagesize=landscape(A4),
+            rightMargin=1*cm,
+            leftMargin=1*cm,
+            topMargin=1.5*cm,
             bottomMargin=2*cm
         )
-        
+
         story = []
-        
-        # En-tête
-        story.extend(self._create_provision_header(period))
-        
-        # Tableau détaillé des provisions
-        story.append(Paragraph("<b>PROVISION POUR CONGÉS PAYÉS</b>", self.styles['CustomHeading']))
-        story.append(self._create_provisions_detail_table(provisions_data, period))
-        story.append(Spacer(1, 1*cm))
-        
-        # Synthèse
-        story.append(self._create_provisions_summary(provisions_data))
-        
-        # Pied de page
-        story.append(Spacer(1, 2*cm))
-        story.append(self._create_provision_footer(period))
-        
-        doc.build(story)
-        
+
+        # Header
+        story.append(self._create_provision_header(period))
+        story.append(Spacer(1, 0.5*cm))
+
+        # Main provisions table
+        story.append(self._create_provisions_table(provisions_data, period))
+        story.append(Spacer(1, 0.3*cm))
+
+        # Footer note
+        story.append(self._create_footer_note())
+
+        doc.build(story, onFirstPage=self._add_footer, onLaterPages=self._add_footer)
+
         if not output_path:
             pdf_buffer.seek(0)
-        
+
         return pdf_buffer
     
-    def _create_provision_header(self, period: str) -> List:
-        """Créer l'en-tête du document de provision"""
-        elements = []
-        
-        # Logo et titre
-        header_data = []
-        if self.logo_path and Path(self.logo_path).exists():
-            try:
-                logo = Image(self.logo_path, width=3*cm, height=2*cm)
-                header_data.append([logo, "PROVISION POUR CONGÉS PAYÉS", ""])
-            except:
-                header_data.append(["", "PROVISION POUR CONGÉS PAYÉS", ""])
-        else:
-            header_data.append(["", "PROVISION POUR CONGÉS PAYÉS", ""])
-        
-        header_table = Table(header_data, colWidths=[5*cm, 8*cm, 5*cm])
-        header_table.setStyle(TableStyle([
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (1, 0), (1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (1, 0), (1, 0), 14),
-        ]))
-        
-        elements.append(header_table)
-        
-        # Informations de période
+    def _create_provision_header(self, period: str) -> KeepTogether:
+        """Créer l'en-tête du document format"""
         period_date = datetime.strptime(period, "%m-%Y")
-        info_data = [
-            [f"Établissement: {self.company_info.get('name', '')}"],
-            [f"Date d'arrêté: {self._get_last_day_of_month(period_date).strftime('%d/%m/%Y')}"],
-            ["Devise: Euro"]
-        ]
-        
-        info_table = Table(info_data, colWidths=[18*cm])
+        last_day = self._get_last_day_of_month(period_date)
+
+        elements = []
+
+        # Title with blue color and underline
+        title_style = ParagraphStyle(
+            'ProvisionTitle',
+            parent=self.styles['CustomNormal'],
+            fontSize=16,
+            fontName='Helvetica-Bold',
+            alignment=TA_LEFT,
+            textColor=self.COLORS['primary_blue'],
+            spaceAfter=4,
+            borderWidth=1,
+            borderColor=self.COLORS['primary_blue'],
+            borderPadding=2
+        )
+        title = Paragraph("Provision pour congés payés", title_style)
+        elements.append(title)
+        elements.append(Spacer(1, 0.3*cm))
+
+        # Header info row
+        etablissement = self.company_info.get('etablissement', '169')
+        company_name = self.company_info.get('name', '')
+
+        info_data = [[
+            f"Etablissement(s)  {etablissement}",
+            "Devises  Euro",
+            f"Date d'arrêté  {last_day.strftime('%d/%m/%Y')}"
+        ]]
+
+        info_table = Table(info_data, colWidths=[8*cm, 8*cm, 8*cm])
         info_table.setStyle(TableStyle([
             ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('TEXTCOLOR', (0, 0), (-1, -1), self.COLORS['text_dark']),
+            ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+            ('ALIGN', (1, 0), (1, 0), 'CENTER'),
+            ('ALIGN', (2, 0), (2, 0), 'RIGHT'),
         ]))
-        
-        elements.append(Spacer(1, 0.5*cm))
         elements.append(info_table)
-        elements.append(Spacer(1, 0.5*cm))
-        
-        return elements
+        elements.append(Spacer(1, 0.3*cm))
+
+        # Etablissement section
+        etab_style = ParagraphStyle(
+            'EtabSection',
+            parent=self.styles['CustomNormal'],
+            fontSize=10,
+            fontName='Helvetica-Bold',
+            alignment=TA_LEFT,
+            textColor=self.COLORS['text_dark'],
+            spaceAfter=8
+        )
+        etab_text = Paragraph(f"Etablissement : {etablissement}    {company_name}", etab_style)
+        elements.append(etab_text)
+
+        return KeepTogether(elements)
     
-    def _create_provisions_detail_table(self, provisions_data: List[Dict], period: str) -> Table:
-        """Créer le tableau détaillé des provisions"""
-        
+    def _create_provisions_table(self, provisions_data: List[Dict], period: str) -> Table:
+        """Créer le tableau des provisions format"""
+
         period_date = datetime.strptime(period, "%m-%Y")
+        last_day = self._get_last_day_of_month(period_date)
+
+        # Calculate period dates
         current_year = period_date.year
-        previous_year = current_year - 1
-        
-        # En-têtes avec périodes
+        prev_year_start = f"01/05/{current_year - 2}"
+        prev_year_end = f"30/04/{current_year - 1}"
+        curr_year_start = f"01/05/{current_year - 1}"
+        curr_year_end = f"30/04/{current_year}"
+        final_start = f"01/05/{current_year}"
+        final_end = last_day.strftime('%d/%m/%Y')
+
+        # Header rows
         data = [
-            ["", f"Période du 01/05/{previous_year} au 30/04/{current_year}", "", "", "",
-             f"Période du 01/05/{current_year} au {period_date.strftime('%d/%m/%Y')}", "", "", ""],
-            ["Salarié", "Base", "Acquis", "Pris", "Restants",
-             "Base", "Acquis", "Pris", "Restants", "Provision €"]
+            # Row 1: Period headers (merged cells)
+            ["Salarié",
+             f"Reliquat au {prev_year_start}", "", "",
+             f"Période du {curr_year_start} au {curr_year_end}", "", "", "", "",
+             f"Période du {final_start} au {final_end}", "", "", "", "", ""],
+            # Row 2: Column headers
+            ["",
+             "Base", "Mois", "Restants",
+             "Base", "Mois", "Acquis", "Pris", "Restants",
+             "Base", "Mois", "Acquis", "Pris", "Restants", "Provisions"]
         ]
-        
-        total_provision = 0
-        
-        for prov in provisions_data:
-            # Période précédente
-            prev_base = prov.get('prev_period_base', 0)
-            prev_acquis = prov.get('prev_period_acquis', 0)
-            prev_pris = prov.get('prev_period_pris', 0)
-            prev_restants = prev_acquis - prev_pris
-            
-            # Période courante
-            curr_base = prov.get('current_period_base', 0)
-            curr_acquis = prov.get('current_period_acquis', 0)
-            curr_pris = prov.get('current_period_pris', 0)
-            curr_restants = curr_acquis - curr_pris
-            
+
+        # Totals accumulators
+        totals = {
+            'rel_base': 0, 'rel_mois': 0, 'rel_restants': 0,
+            'p1_base': 0, 'p1_mois': 0, 'p1_acquis': 0, 'p1_pris': 0, 'p1_restants': 0,
+            'p2_base': 0, 'p2_mois': 0, 'p2_acquis': 0, 'p2_pris': 0, 'p2_restants': 0,
+            'provisions': 0
+        }
+
+        # Employee rows
+        for emp in provisions_data:
+            matricule = emp.get('matricule', '')
+            nom = emp.get('nom', '')
+            prenom = emp.get('prenom', '')
+
+            # Reliquat (previous period carryover)
+            rel_base = emp.get('reliquat_base', 0)
+            rel_mois = emp.get('reliquat_mois', 0)
+            rel_restants = emp.get('reliquat_restants', 0)
+
+            # Period 1 (N-1 year)
+            p1_base = emp.get('p1_base', 0)
+            p1_mois = emp.get('p1_mois', 0)
+            p1_acquis = emp.get('cp_acquis_n1', 0)
+            p1_pris = emp.get('cp_pris_n1', 0)
+            p1_restants = emp.get('cp_restants_n1', 0)
+
+            # Period 2 (current year)
+            p2_base = emp.get('p2_base', 0)
+            p2_mois = emp.get('p2_mois', 0)
+            p2_acquis = emp.get('cp_acquis_n', 0)
+            p2_pris = emp.get('cp_pris_n', 0)
+            p2_restants = emp.get('cp_restants_n', 0)
+
             # Provision
-            provision = prov.get('provision_amount', 0)
-            total_provision += provision
-            
+            provision = emp.get('provision_amount', 0)
+
+            # Update totals
+            totals['rel_base'] += rel_base
+            totals['rel_mois'] += rel_mois
+            totals['rel_restants'] += rel_restants
+            totals['p1_base'] += p1_base
+            totals['p1_mois'] += p1_mois
+            totals['p1_acquis'] += p1_acquis
+            totals['p1_pris'] += p1_pris
+            totals['p1_restants'] += p1_restants
+            totals['p2_base'] += p2_base
+            totals['p2_mois'] += p2_mois
+            totals['p2_acquis'] += p2_acquis
+            totals['p2_pris'] += p2_pris
+            totals['p2_restants'] += p2_restants
+            totals['provisions'] += provision
+
             data.append([
-                f"{prov.get('nom', '')} {prov.get('prenom', '')}",
-                PDFStyles.format_currency(prev_base),
-                f"{prev_acquis:.1f}",
-                f"{prev_pris:.1f}",
-                f"{prev_restants:.1f}",
-                PDFStyles.format_currency(curr_base),
-                f"{curr_acquis:.1f}",
-                f"{curr_pris:.1f}",
-                f"{curr_restants:.1f}",
-                PDFStyles.format_currency(provision)
+                f"{matricule} {nom} {prenom}",
+                PDFStyles.format_currency(rel_base) if rel_base > 0 else "",
+                f"{rel_mois:.2f}" if rel_mois > 0 else "",
+                f"{rel_restants:.2f}" if rel_restants > 0 else "",
+                PDFStyles.format_currency(p1_base) if p1_base > 0 else "",
+                f"{p1_mois:.2f}" if p1_mois > 0 else "",
+                f"{p1_acquis:.2f}" if p1_acquis > 0 else "",
+                f"{p1_pris:.2f}" if p1_pris > 0 else "",
+                f"{p1_restants:.2f}" if p1_restants > 0 else "",
+                PDFStyles.format_currency(p2_base) if p2_base > 0 else "",
+                f"{p2_mois:.2f}" if p2_mois > 0 else "",
+                f"{p2_acquis:.2f}" if p2_acquis > 0 else "",
+                f"{p2_pris:.2f}" if p2_pris > 0 else "",
+                f"{p2_restants:.2f}" if p2_restants > 0 else "",
+                PDFStyles.format_currency(provision) if provision > 0 else ""
             ])
-        
-        # Total
+
+        # Total row
         data.append([
-            "TOTAL",
-            "", "", "", "",
-            "", "", "", "",
-            PDFStyles.format_currency(total_provision)
+            "Total Etablissement",
+            PDFStyles.format_currency(totals['rel_base']),
+            f"{totals['rel_mois']:.2f}",
+            f"{totals['rel_restants']:.2f}",
+            PDFStyles.format_currency(totals['p1_base']),
+            f"{totals['p1_mois']:.2f}",
+            f"{totals['p1_acquis']:.2f}",
+            f"{totals['p1_pris']:.2f}",
+            f"{totals['p1_restants']:.2f}",
+            PDFStyles.format_currency(totals['p2_base']),
+            f"{totals['p2_mois']:.2f}",
+            f"{totals['p2_acquis']:.2f}",
+            f"{totals['p2_pris']:.2f}",
+            f"{totals['p2_restants']:.2f}",
+            PDFStyles.format_currency(totals['provisions'])
         ])
-        
-        table = Table(data, colWidths=[3.5*cm, 2*cm, 1.5*cm, 1.5*cm, 1.5*cm,
-                                       2*cm, 1.5*cm, 1.5*cm, 1.5*cm, 2.5*cm])
-        table.setStyle(TableStyle([
-            # Fusion des cellules d'en-tête pour les périodes
-            ('SPAN', (1, 0), (4, 0)),
-            ('SPAN', (5, 0), (8, 0)),
-            ('BACKGROUND', (0, 0), (-1, 1), colors.HexColor('#34495E')),
-            ('TEXTCOLOR', (0, 0), (-1, 1), colors.whitesmoke),
+
+        # Column widths (landscape A4)
+        col_widths = [4*cm, 1.5*cm, 1*cm, 1.3*cm,
+                      1.5*cm, 1*cm, 1.2*cm, 1.2*cm, 1.3*cm,
+                      1.5*cm, 1*cm, 1.2*cm, 1.2*cm, 1.3*cm, 1.8*cm]
+
+        table = Table(data, colWidths=col_widths, repeatRows=2)
+
+        # Style the table
+        style = TableStyle([
+            # Merge period header cells
+            ('SPAN', (1, 0), (3, 0)),  # Reliquat
+            ('SPAN', (4, 0), (8, 0)),  # Period 1
+            ('SPAN', (9, 0), (14, 0)), # Period 2
+
+            # Header styling
+            ('BACKGROUND', (0, 0), (-1, 1), self.COLORS['primary_blue']),
+            ('TEXTCOLOR', (0, 0), (-1, 1), colors.white),
             ('ALIGN', (0, 0), (-1, 1), 'CENTER'),
             ('FONTNAME', (0, 0), (-1, 1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 7),
+            ('FONTSIZE', (0, 0), (-1, 1), 8),
+            ('VALIGN', (0, 0), (-1, 1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, 1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, 1), 3),
+
+            # Data rows
+            ('FONTSIZE', (0, 2), (-1, -1), 7),
+            ('TEXTCOLOR', (0, 2), (-1, -1), self.COLORS['text_dark']),
             ('ALIGN', (1, 2), (-1, -1), 'RIGHT'),
-            ('GRID', (0, 0), (-1, -2), 0.5, colors.grey),
-            ('LINEBELOW', (0, -2), (-1, -2), 2, colors.black),
-            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#ECF0F1')),
-        ]))
-        
-        return table
-    
-    def _create_provisions_summary(self, provisions_data: List[Dict]) -> Table:
-        """Créer le tableau de synthèse des provisions"""
-        
-        total_restants_prev = sum(p.get('prev_period_acquis', 0) - p.get('prev_period_pris', 0) 
-                                 for p in provisions_data)
-        total_restants_curr = sum(p.get('current_period_acquis', 0) - p.get('current_period_pris', 0) 
-                                 for p in provisions_data)
-        total_provision = sum(p.get('provision_amount', 0) for p in provisions_data)
-        
-        data = [
-            ["RÉSUMÉ", ""],
-            ["", ""],
-            ["Nombre de salariés", str(len(provisions_data))],
-            ["Total jours restants (période précédente)", f"{total_restants_prev:.1f} jours"],
-            ["Total jours restants (période courante)", f"{total_restants_curr:.1f} jours"],
-            ["Total jours restants", f"{total_restants_prev + total_restants_curr:.1f} jours"],
-            ["", ""],
-            ["PROVISION TOTALE", PDFStyles.format_currency(total_provision)]
-        ]
-        
-        table = Table(data, colWidths=[10*cm, 6*cm])
-        table.setStyle(TableStyle([
-            ('SPAN', (0, 0), (1, 0)),
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2980B9')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
             ('ALIGN', (0, 2), (0, -1), 'LEFT'),
-            ('ALIGN', (1, 2), (1, -1), 'RIGHT'),
-            ('GRID', (0, 2), (-1, -2), 0.5, colors.grey),
-            ('LINEBELOW', (0, -2), (-1, -2), 2, colors.black),
+
+            # Grid
+            ('GRID', (0, 0), (-1, -1), 0.5, self.COLORS['border_gray']),
+
+            # Alternating row colors
+            ('ROWBACKGROUNDS', (0, 2), (-1, -2), [colors.white, self.COLORS['very_light_blue']]),
+
+            # Total row
             ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, -1), (-1, -1), 12),
-            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#E74C3C')),
-            ('TEXTCOLOR', (0, -1), (-1, -1), colors.whitesmoke),
-        ]))
-        
+            ('BACKGROUND', (0, -1), (-1, -1), self.COLORS['light_blue']),
+            ('TEXTCOLOR', (0, -1), (-1, -1), self.COLORS['primary_blue']),
+        ])
+
+        table.setStyle(style)
         return table
     
+    def _create_footer_note(self) -> Paragraph:
+        """Create footer note about negative amounts"""
+        note_style = ParagraphStyle(
+            'FooterNote',
+            parent=self.styles['CustomNormal'],
+            fontSize=7,
+            textColor=self.COLORS['text_gray'],
+            alignment=TA_LEFT,
+            italic=True
+        )
+        return Paragraph("*Les montants négatifs ne sont pas totalisés", note_style)
+
+    def _add_footer(self, canvas_obj, doc):
+        """Add footer to each page"""
+        canvas_obj.saveState()
+
+        width, height = landscape(A4)
+
+        # Footer text
+        canvas_obj.setFont('Helvetica', 8)
+        footer_text = f"Imprimé le {datetime.now().strftime('%d/%m/%y à %H:%M')}"
+        canvas_obj.drawString(1*cm, 1*cm, footer_text)
+
+        # Author
+        username = getpass.getuser()
+        author = self.company_info.get('author', f'Par {username}')
+        canvas_obj.drawString(1*cm, 0.7*cm, author)
+
+        # Page number (right aligned)
+        page_text = f"Page n° {doc.page}"
+        canvas_obj.setFont('Helvetica', 8)
+        canvas_obj.drawRightString(width - 1*cm, 1*cm, page_text)
+
+        # Company code (right bottom)
+        company_code = self.company_info.get('code', '')
+        company_name = self.company_info.get('name', '')
+        if company_code or company_name:
+            canvas_obj.setFont('Helvetica', 7)
+            company_text = f"{company_code} {company_name}".strip()
+            canvas_obj.drawRightString(width - 1*cm, 0.7*cm, company_text)
+
+        canvas_obj.restoreState()
+
     def _get_last_day_of_month(self, date: datetime) -> datetime:
-        """Obtenir le dernier jour du mois"""
+        """Get last day of month"""
         last_day = calendar.monthrange(date.year, date.month)[1]
         return datetime(date.year, date.month, last_day)
-    
-    def _create_provision_footer(self, period: str) -> Paragraph:
-        """Créer le pied de page du document de provision"""
-        footer_text = f"""
-        <para align="center" fontSize="8">
-        Provision pour congés payés - Période {period}<br/>
-        Document édité le {datetime.now().strftime("%d/%m/%Y à %H:%M")}<br/>
-        Les montants incluent les charges sociales estimées<br/>
-        Document comptable à conserver
-        </para>
-        """
-        
-        return Paragraph(footer_text, self.styles['CustomNormal'])
 
 class PayJournalPDFGenerator:
     """Générateur du journal de paie"""
