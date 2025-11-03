@@ -94,7 +94,16 @@ class PDFStyles:
             fontSize=10,
             fontName='Helvetica-Bold'
         ))
-        
+
+        # Style pour le texte petit (tableaux)
+        styles.add(ParagraphStyle(
+            name='CustomSmall',
+            parent=styles['Normal'],
+            fontSize=7,
+            leading=9,
+            alignment=TA_CENTER
+        ))
+
         return styles
     
     @staticmethod
@@ -1705,19 +1714,15 @@ class ChargesSocialesPDFGenerator:
         # En-tête
         story.extend(self._create_header(period))
 
-        # Agrégation des charges par code
-        charges_aggregated = self._aggregate_charges(employees_data)
+        # Agrégation des charges par organisme
+        organismes = self._aggregate_charges(employees_data)
 
-        # Grouper par organisme (pour l'instant juste liste les charges)
-        # TODO: ajouter le mapping organisme quand disponible
-        story.append(self._create_charges_table(charges_aggregated, period))
+        # Tableau des charges groupées par organisme
+        story.append(self._create_charges_table(organismes))
         story.append(Spacer(1, 0.5*cm))
 
-        # Total global
-        story.append(self._create_total_summary(charges_aggregated))
-
         # Pied de page
-        story.append(Spacer(1, 1*cm))
+        story.append(Spacer(1, 0.5*cm))
         story.append(self._create_footer(period))
 
         doc.build(story)
@@ -1760,27 +1765,51 @@ class ChargesSocialesPDFGenerator:
 
         return elements
 
+    def _get_organisme_mapping(self) -> Dict[str, Tuple[str, str]]:
+        """Map charge codes to organismes (code, name)"""
+        return {
+            'UNEDIC': ('002', 'FRANCE TRAVAIL'),
+            'CCSS': ('101', 'CCSS'),
+            'RETRAITE_CAR': ('103', 'CAR'),
+            'CONTRIB_EQUILIBRE_TECH': ('103', 'CAR'),
+            'CONTRIB_EQUILIBRE_GEN_T1': ('103', 'CAR'),
+            'CONTRIB_EQUILIBRE_GEN_T2': ('103', 'CAR'),
+            'CMRC TA': ('105', 'CMRC'),
+            'CMRC TB': ('105', 'CMRC'),
+        }
+
     def _aggregate_charges(self, employees_data: List[Dict]) -> Dict:
         """
-        Agréger les charges par code
+        Agréger les charges par organisme puis par code
 
         Returns:
             Dict avec structure: {
-                'charge_code': {
-                    'description': str,
-                    'nbre_salarie': int,
-                    'base_cotisee': float,
-                    'taux_sal': float,
-                    'taux_pat': float,
-                    'montant_sal': float,
-                    'montant_pat': float,
+                'organisme_code': {
+                    'organisme_name': str,
+                    'charges': {
+                        'charge_code': {
+                            'description': str,
+                            'nbre_salarie': int,
+                            'base_cotisee': float,
+                            'taux_sal': float,
+                            'taux_pat': float,
+                            'montant_sal': float,
+                            'montant_pat': float,
+                            'homme': int,
+                            'femme': int
+                        }
+                    },
                     'homme': int,
                     'femme': int
                 }
             }
         """
-        charges_agg = {}
+        organismes = {}
         rates_csv = self._load_rates()
+        organisme_mapping = self._get_organisme_mapping()
+
+        # Track which employees have been counted per organisme
+        organisme_employees = {}
 
         for emp in employees_data:
             details = emp.get('details_charges', {})
@@ -1788,51 +1817,55 @@ class ChargesSocialesPDFGenerator:
                 continue
 
             sexe = emp.get('sexe', '').upper()
+            matricule = emp.get('matricule', '')
 
             charges_sal = details.get('charges_salariales', {})
             charges_pat = details.get('charges_patronales', {})
 
-            # Traiter charges salariales
+            # Process all charges (both salarial and patronal)
+            all_charges = {}
+
+            # Combine charges_sal and charges_pat
             for code, montant in (charges_sal.items() if isinstance(charges_sal, dict) else []):
-                if montant == 0:
-                    continue
+                if code not in all_charges:
+                    all_charges[code] = {'sal': 0, 'pat': 0}
+                all_charges[code]['sal'] += montant
 
-                if code not in charges_agg:
-                    rate_info = rates_csv.get(code, {})
-                    charges_agg[code] = {
-                        'description': rate_info.get('description', code),
-                        'nbre_salarie': 0,
-                        'base_cotisee': 0,
-                        'taux_sal': rate_info.get('taux_sal', 0),
-                        'taux_pat': rate_info.get('taux_pat', 0),
-                        'montant_sal': 0,
-                        'montant_pat': 0,
-                        'homme': 0,
-                        'femme': 0
-                    }
-
-                # Estimer la base à partir du montant et du taux
-                taux_sal = charges_agg[code]['taux_sal']
-                if taux_sal > 0:
-                    base = montant / (taux_sal / 100)
-                    charges_agg[code]['base_cotisee'] += base
-
-                charges_agg[code]['montant_sal'] += montant
-                charges_agg[code]['nbre_salarie'] += 1
-
-                if sexe == 'H':
-                    charges_agg[code]['homme'] += 1
-                elif sexe == 'F':
-                    charges_agg[code]['femme'] += 1
-
-            # Traiter charges patronales
             for code, montant in (charges_pat.items() if isinstance(charges_pat, dict) else []):
-                if montant == 0:
+                if code not in all_charges:
+                    all_charges[code] = {'sal': 0, 'pat': 0}
+                all_charges[code]['pat'] += montant
+
+            # Process combined charges
+            for code, montants in all_charges.items():
+                if montants['sal'] == 0 and montants['pat'] == 0:
                     continue
 
-                if code not in charges_agg:
+                # Get organisme info
+                org_code, org_name = organisme_mapping.get(code, ('999', 'AUTRES'))
+
+                # Initialize organisme if needed
+                if org_code not in organismes:
+                    organismes[org_code] = {
+                        'organisme_name': org_name,
+                        'charges': {},
+                        'homme': 0,
+                        'femme': 0
+                    }
+                    organisme_employees[org_code] = set()
+
+                # Track employee for this organisme
+                if matricule not in organisme_employees[org_code]:
+                    organisme_employees[org_code].add(matricule)
+                    if sexe == 'H':
+                        organismes[org_code]['homme'] += 1
+                    elif sexe == 'F':
+                        organismes[org_code]['femme'] += 1
+
+                # Initialize charge if needed
+                if code not in organismes[org_code]['charges']:
                     rate_info = rates_csv.get(code, {})
-                    charges_agg[code] = {
+                    organismes[org_code]['charges'][code] = {
                         'description': rate_info.get('description', code),
                         'nbre_salarie': 0,
                         'base_cotisee': 0,
@@ -1840,27 +1873,33 @@ class ChargesSocialesPDFGenerator:
                         'taux_pat': rate_info.get('taux_pat', 0),
                         'montant_sal': 0,
                         'montant_pat': 0,
-                        'homme': 0,
-                        'femme': 0
+                        'employes': set()
                     }
 
-                # Estimer la base à partir du montant et du taux
-                taux_pat = charges_agg[code]['taux_pat']
-                if taux_pat > 0 and charges_agg[code]['base_cotisee'] == 0:
-                    base = montant / (taux_pat / 100)
-                    charges_agg[code]['base_cotisee'] += base
+                charge_data = organismes[org_code]['charges'][code]
 
-                charges_agg[code]['montant_pat'] += montant
+                # Track employee for this charge
+                if matricule not in charge_data['employes']:
+                    charge_data['employes'].add(matricule)
+                    charge_data['nbre_salarie'] += 1
 
-                # Ne compter le salarié qu'une fois (déjà compté dans salariales)
-                if code not in charges_sal or charges_sal.get(code, 0) == 0:
-                    charges_agg[code]['nbre_salarie'] += 1
-                    if sexe == 'H':
-                        charges_agg[code]['homme'] += 1
-                    elif sexe == 'F':
-                        charges_agg[code]['femme'] += 1
+                # Calculate base from taux and montant
+                if montants['sal'] > 0 and charge_data['taux_sal'] > 0:
+                    base = montants['sal'] / (charge_data['taux_sal'] / 100)
+                    charge_data['base_cotisee'] += base
+                elif montants['pat'] > 0 and charge_data['taux_pat'] > 0 and charge_data['base_cotisee'] == 0:
+                    base = montants['pat'] / (charge_data['taux_pat'] / 100)
+                    charge_data['base_cotisee'] += base
 
-        return charges_agg
+                charge_data['montant_sal'] += montants['sal']
+                charge_data['montant_pat'] += montants['pat']
+
+        # Clean up employes sets (not JSON serializable)
+        for org_data in organismes.values():
+            for charge_data in org_data['charges'].values():
+                del charge_data['employes']
+
+        return organismes
 
     def _load_rates(self) -> Dict:
         """Charger les taux depuis le CSV pour avoir les descriptions"""
@@ -1892,8 +1931,8 @@ class ChargesSocialesPDFGenerator:
 
         return rates
 
-    def _create_charges_table(self, charges_agg: Dict, period: str) -> Table:
-        """Créer le tableau des charges"""
+    def _create_charges_table(self, organismes: Dict) -> Table:
+        """Créer le tableau des charges regroupées par organisme"""
 
         # En-têtes
         data = [[
@@ -1909,54 +1948,87 @@ class ChargesSocialesPDFGenerator:
             Paragraph("<b>MONTANT<br/>GLOBAL</b>", self.styles['CustomSmall'])
         ]]
 
-        # Lignes de données
-        total_sal = 0
-        total_pat = 0
-        total_homme = 0
-        total_femme = 0
+        # Totaux globaux
+        total_sal_global = 0
+        total_pat_global = 0
+        total_homme_global = 0
+        total_femme_global = 0
 
-        for code, values in sorted(charges_agg.items()):
-            taux_sal = values['taux_sal']
-            taux_pat = values['taux_pat']
-            taux_glo = taux_sal + taux_pat
+        # Parcourir chaque organisme dans l'ordre
+        for org_code in sorted(organismes.keys()):
+            org_data = organismes[org_code]
+            org_name = org_data['organisme_name']
+            charges = org_data['charges']
 
-            montant_sal = values['montant_sal']
-            montant_pat = values['montant_pat']
-            montant_glo = montant_sal + montant_pat
-
-            total_sal += montant_sal
-            total_pat += montant_pat
-            total_homme += values['homme']
-            total_femme += values['femme']
-
+            # Header de l'organisme - merge cells across
+            org_header_text = f"<b>Organisme : {org_code}  {org_name}</b>"
             data.append([
-                f"{code}\n{values['description']}",
-                str(values['nbre_salarie']),
-                PDFStyles.format_currency(values['base_cotisee']),
-                PDFStyles.format_currency(values['base_cotisee']),
-                f"{taux_sal:.5f}" if taux_sal > 0 else "",
-                f"{taux_pat:.5f}" if taux_pat > 0 else "",
-                f"{taux_glo:.5f}" if taux_glo > 0 else "",
-                PDFStyles.format_currency(montant_sal) if montant_sal > 0 else "",
-                PDFStyles.format_currency(montant_pat) if montant_pat > 0 else "",
-                PDFStyles.format_currency(montant_glo)
+                Paragraph(org_header_text, self.styles['CustomSmall']),
+                "", "", "", "", "", "", "", "", ""
             ])
 
-        # Ligne de total
+            # Totaux pour cet organisme
+            total_sal_org = 0
+            total_pat_org = 0
+
+            # Lignes de charges pour cet organisme
+            for code, values in sorted(charges.items()):
+                taux_sal = values['taux_sal']
+                taux_pat = values['taux_pat']
+                taux_glo = taux_sal + taux_pat
+
+                montant_sal = values['montant_sal']
+                montant_pat = values['montant_pat']
+                montant_glo = montant_sal + montant_pat
+
+                total_sal_org += montant_sal
+                total_pat_org += montant_pat
+
+                data.append([
+                    f"{code}",
+                    f"{values['description']}",
+                    str(values['nbre_salarie']),
+                    PDFStyles.format_currency(values['base_cotisee']),
+                    f"{taux_sal:.2f}" if taux_sal > 0 else "",
+                    f"{taux_pat:.2f}" if taux_pat > 0 else "",
+                    f"{taux_glo:.2f}" if taux_glo > 0 else "",
+                    PDFStyles.format_currency(montant_sal) if montant_sal > 0 else "",
+                    PDFStyles.format_currency(montant_pat) if montant_pat > 0 else "",
+                    PDFStyles.format_currency(montant_glo)
+                ])
+
+            # Sous-total organisme
+            homme_org = org_data['homme']
+            femme_org = org_data['femme']
+            data.append([
+                Paragraph(f"<b>TOTAL {org_name}</b>", self.styles['CustomSmall']),
+                Paragraph(f"Homme : {homme_org}  Femme : {femme_org}", self.styles['CustomSmall']),
+                "", "", "", "", "",
+                Paragraph(f"<b>{PDFStyles.format_currency(total_sal_org)}</b>", self.styles['CustomSmall']),
+                Paragraph(f"<b>{PDFStyles.format_currency(total_pat_org)}</b>", self.styles['CustomSmall']),
+                Paragraph(f"<b>{PDFStyles.format_currency(total_sal_org + total_pat_org)}</b>", self.styles['CustomSmall'])
+            ])
+
+            total_sal_global += total_sal_org
+            total_pat_global += total_pat_org
+            total_homme_global += homme_org
+            total_femme_global += femme_org
+
+        # Ligne de total global
         data.append([
-            Paragraph(f"<b>TOTAL GLOBAL</b><br/>Homme : {total_homme}  Femme : {total_femme}",
-                     self.styles['CustomSmall']),
+            Paragraph(f"<b>TOTAL GLOBAL</b>", self.styles['CustomSmall']),
             "", "", "", "", "", "",
-            Paragraph(f"<b>{PDFStyles.format_currency(total_sal)}</b>", self.styles['CustomSmall']),
-            Paragraph(f"<b>{PDFStyles.format_currency(total_pat)}</b>", self.styles['CustomSmall']),
-            Paragraph(f"<b>{PDFStyles.format_currency(total_sal + total_pat)}</b>", self.styles['CustomSmall'])
+            Paragraph(f"<b>{PDFStyles.format_currency(total_sal_global)}</b>", self.styles['CustomSmall']),
+            Paragraph(f"<b>{PDFStyles.format_currency(total_pat_global)}</b>", self.styles['CustomSmall']),
+            Paragraph(f"<b>{PDFStyles.format_currency(total_sal_global + total_pat_global)}</b>", self.styles['CustomSmall'])
         ])
 
         table = Table(data, colWidths=[
-            3.5*cm, 1*cm, 2*cm, 2*cm, 1.2*cm, 1.2*cm, 1.2*cm, 2*cm, 2*cm, 2*cm
+            1.5*cm, 3.5*cm, 1.2*cm, 1.8*cm, 1.2*cm, 1.2*cm, 1.2*cm, 2*cm, 2*cm, 2*cm
         ])
 
-        table.setStyle(TableStyle([
+        # Style de base
+        table_style = [
             # En-tête
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#CCCCCC')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
@@ -1965,47 +2037,52 @@ class ChargesSocialesPDFGenerator:
             ('FONTSIZE', (0, 0), (-1, 0), 7),
             ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
 
-            # Corps
-            ('FONTSIZE', (0, 1), (-1, -2), 7),
-            ('ALIGN', (1, 1), (-1, -1), 'RIGHT'),
-            ('ALIGN', (0, 1), (0, -1), 'LEFT'),
+            # Corps - alignement
+            ('FONTSIZE', (0, 1), (-1, -1), 7),
+            ('ALIGN', (2, 1), (-1, -1), 'RIGHT'),
+            ('ALIGN', (0, 1), (1, -1), 'LEFT'),
             ('VALIGN', (0, 1), (-1, -1), 'TOP'),
-
-            # Ligne totale
-            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#E6E6E6')),
-            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
 
             # Grille
             ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
             ('BOX', (0, 0), (-1, -1), 1, colors.black),
-        ]))
+        ]
 
-        return table
+        # Style pour les headers d'organisme et sous-totaux
+        row_idx = 1
+        for org_code in sorted(organismes.keys()):
+            org_data = organismes[org_code]
+            charges_count = len(org_data['charges'])
 
-    def _create_total_summary(self, charges_agg: Dict) -> Table:
-        """Créer le résumé des totaux"""
-        total_sal = sum(v['montant_sal'] for v in charges_agg.values())
-        total_pat = sum(v['montant_pat'] for v in charges_agg.values())
-        total_glo = total_sal + total_pat
+            # Header organisme - span across all columns
+            table_style.extend([
+                ('FONTNAME', (0, row_idx), (-1, row_idx), 'Helvetica-Bold'),
+                ('SPAN', (0, row_idx), (-1, row_idx)),
+            ])
+            row_idx += 1
 
-        data = [[
-            "TOTAL GLOBAL",
-            PDFStyles.format_currency(total_sal),
-            PDFStyles.format_currency(total_pat),
-            PDFStyles.format_currency(total_glo)
-        ]]
+            # Lignes de charges
+            row_idx += charges_count
 
-        table = Table(data, colWidths=[10*cm, 3*cm, 3*cm, 3*cm])
-        table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#1a5f9e')),
-            ('TEXTCOLOR', (0, 0), (-1, -1), colors.white),
-            ('ALIGN', (0, 0), (0, 0), 'LEFT'),
-            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 11),
-            ('BOX', (0, 0), (-1, -1), 1, colors.black),
-        ]))
+            # Sous-total - pas de fond, juste bold avec ligne
+            table_style.extend([
+                ('FONTNAME', (0, row_idx), (-1, row_idx), 'Helvetica-Bold'),
+                ('SPAN', (0, row_idx), (1, row_idx)),
+                ('SPAN', (2, row_idx), (6, row_idx)),
+                ('LINEABOVE', (0, row_idx), (-1, row_idx), 1, colors.black),
+            ])
+            row_idx += 1
 
+        # Total global - fond bleu
+        table_style.extend([
+            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#1a5f9e')),
+            ('TEXTCOLOR', (0, -1), (-1, -1), colors.white),
+            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+            ('SPAN', (0, -1), (6, -1)),
+            ('LINEABOVE', (0, -1), (-1, -1), 2, colors.black),
+        ])
+
+        table.setStyle(TableStyle(table_style))
         return table
 
     def _create_footer(self, period: str) -> Paragraph:

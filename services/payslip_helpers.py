@@ -290,12 +290,12 @@ def clean_employee_data_for_pdf(employee_dict: Dict) -> Dict:
     # Copy all fields
     for key, value in employee_dict.items():
         if key in numeric_fields:
-            # Force numeric conversion
-            if isinstance(value, dict):
+            # Force numeric conversion - check None first
+            if value is None:
+                cleaned[key] = 0
+            elif isinstance(value, dict):
                 cleaned[key] = 0
             elif isinstance(value, (list, tuple)):
-                cleaned[key] = 0
-            elif value is None:
                 cleaned[key] = 0
             elif isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
                 cleaned[key] = 0
@@ -307,8 +307,8 @@ def clean_employee_data_for_pdf(employee_dict: Dict) -> Dict:
                 except (TypeError, ValueError, AttributeError):
                     cleaned[key] = 0
         else:
-            # Keep non-numeric fields as-is
-            cleaned[key] = value
+            # Keep non-numeric fields as-is, but handle None safely
+            cleaned[key] = value if value is not None else ""
 
     return cleaned
 
