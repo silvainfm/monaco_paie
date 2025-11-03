@@ -67,103 +67,99 @@ with tab1:
 
             output = io.BytesIO()
 
-            if HAS_EXCEL:
-                with Workbook(output) as wb:
-                    # Sheet 1: Main payroll data with conditional formatting
-                    df.write_excel(
-                        workbook=wb,
-                        worksheet="Paies",
-                        position=(2, 0),
-                        table_style={
-                            "style": "Table Style Medium 2",
-                            "first_column": True,
-                        },
-                        conditional_formats={
-                            "salaire_brut": {
-                                "type": "3_color_scale",
-                                "min_color": "#63be7b",
-                                "mid_color": "#ffeb84",
-                                "max_color": "#f8696b",
-                            },
-                            "salaire_net": {
-                                "type": "data_bar",
-                                "data_bar_2010": True,
-                                "bar_color": "#2c3e50",
-                                "bar_negative_color_same": True,
-                            },
-                        } if 'salaire_brut' in df.columns and 'salaire_net' in df.columns else {},
-                        column_widths={
-                            "matricule": 100,
-                            "nom": 150,
-                            "prenom": 150,
-                            "salaire_brut": 120,
-                            "salaire_net": 120,
-                        },
-                        autofit=True,
-                    )
 
-                    # Add title to payroll sheet
-                    ws_paies = wb.get_worksheet_by_name("Paies")
-                    fmt_title = wb.add_format({
-                        "font_color": "#2c3e50",
-                        "font_size": 14,
-                        "bold": True,
-                        "bg_color": "#f8f9fa",
-                    })
-                    ws_paies.write(0, 0, f"Paies - {st.session_state.current_company} - {st.session_state.current_period}", fmt_title)
-                    ws_paies.set_row(0, 20)
-
-                    # Sheet 2: Summary statistics
-                    summary_data = pl.DataFrame({
-                        'Statistique': [
-                            'Nombre de salariés',
-                            'Masse salariale brute',
-                            'Total charges salariales',
-                            'Total charges patronales',
-                            'Total net à payer',
-                            'Coût total employeur'
-                        ],
-                        'Valeur': [
-                            len(df),
-                            df.select(pl.col('salaire_brut').sum()).item() if 'salaire_brut' in df.columns else 0,
-                            df.select(pl.col('total_charges_salariales').sum()).item() if 'total_charges_salariales' in df.columns else 0,
-                            df.select(pl.col('total_charges_patronales').sum()).item() if 'total_charges_patronales' in df.columns else 0,
-                            df.select(pl.col('salaire_net').sum()).item() if 'salaire_net' in df.columns else 0,
-                            df.select(pl.col('cout_total_employeur').sum()).item() if 'cout_total_employeur' in df.columns else 0,
-                        ]
-                    })
-
-                    summary_data.write_excel(
-                        workbook=wb,
-                        worksheet="Synthèse",
-                        position=(2, 0),
-                        table_style={
-                            "style": "Table Style Light 9",
-                            "first_column": True,
+            with Workbook(output) as wb:
+                # Sheet 1: Main payroll data with conditional formatting
+                df.write_excel(
+                    workbook=wb,
+                    worksheet="Paies",
+                    position=(2, 0),
+                    table_style={
+                        "style": "Table Style Medium 2",
+                        "first_column": True,
+                    },
+                    conditional_formats={
+                        "salaire_brut": {
+                            "type": "3_color_scale",
+                            "min_color": "#63be7b",
+                            "mid_color": "#ffeb84",
+                            "max_color": "#f8696b",
                         },
-                        column_formats={
-                            "Valeur": "#,##0.00 €"
+                        "salaire_net": {
+                            "type": "data_bar",
+                            "data_bar_2010": True,
+                            "bar_color": "#2c3e50",
+                            "bar_negative_color_same": True,
                         },
-                        column_widths={
-                            "Statistique": 250,
-                            "Valeur": 150,
-                        },
-                    )
+                    } if 'salaire_brut' in df.columns and 'salaire_net' in df.columns else {},
+                    column_widths={
+                        "matricule": 100,
+                        "nom": 150,
+                        "prenom": 150,
+                        "salaire_brut": 120,
+                        "salaire_net": 120,
+                    },
+                    autofit=True,
+                )
 
-                    # Add title to summary sheet
-                    ws_synthese = wb.get_worksheet_by_name("Synthèse")
-                    ws_synthese.write(0, 0, "Synthèse de la Paie", fmt_title)
-                    ws_synthese.set_row(0, 20)
+                # Add title to payroll sheet
+                ws_paies = wb.get_worksheet_by_name("Paies")
+                fmt_title = wb.add_format({
+                    "font_color": "#2c3e50",
+                    "font_size": 14,
+                    "bold": True,
+                    "bg_color": "#f8f9fa",
+                })
+                ws_paies.write(0, 0, f"Paies - {st.session_state.current_company} - {st.session_state.current_period}", fmt_title)
+                ws_paies.set_row(0, 20)
 
-            else:
-                # Fallback to CSV if xlsxwriter not available
-                df.write_csv(output)
+                # Sheet 2: Summary statistics
+                summary_data = pl.DataFrame({
+                    'Statistique': [
+                        'Nombre de salariés',
+                        'Masse salariale brute',
+                        'Total charges salariales',
+                        'Total charges patronales',
+                        'Total net à payer',
+                        'Coût total employeur'
+                    ],
+                    'Valeur': [
+                        len(df),
+                        df.select(pl.col('salaire_brut').sum()).item() if 'salaire_brut' in df.columns else 0,
+                        df.select(pl.col('total_charges_salariales').sum()).item() if 'total_charges_salariales' in df.columns else 0,
+                        df.select(pl.col('total_charges_patronales').sum()).item() if 'total_charges_patronales' in df.columns else 0,
+                        df.select(pl.col('salaire_net').sum()).item() if 'salaire_net' in df.columns else 0,
+                        df.select(pl.col('cout_total_employeur').sum()).item() if 'cout_total_employeur' in df.columns else 0,
+                    ]
+                })
+
+                summary_data.write_excel(
+                    workbook=wb,
+                    worksheet="Synthèse",
+                    position=(2, 0),
+                    table_style={
+                        "style": "Table Style Light 9",
+                        "first_column": True,
+                    },
+                    column_formats={
+                        "Valeur": "#,##0.00 €"
+                    },
+                    column_widths={
+                        "Statistique": 250,
+                        "Valeur": 150,
+                    },
+                )
+
+                # Add title to summary sheet
+                ws_synthese = wb.get_worksheet_by_name("Synthèse")
+                ws_synthese.write(0, 0, "Synthèse de la Paie", fmt_title)
+                ws_synthese.set_row(0, 20)
 
             st.download_button(
                 label="💾 Télécharger Excel",
                 data=output.getvalue(),
                 file_name=f"paies_{st.session_state.current_company}_{st.session_state.current_period}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if HAS_EXCEL else "text/csv",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
             )
 
@@ -178,7 +174,7 @@ with tab1:
             """)
 
         except ImportError:
-            st.error("Le module xlsxwriter n'est pas installé. Installez-le avec: pip install xlsxwriter")
+            st.error("Le module xlsxwriter n'est pas installé")
         except Exception as e:
             st.error(f"Erreur lors de la génération: {str(e)}")
             st.exception(e)
