@@ -301,7 +301,6 @@ with tab4:
                 }
 
                 st.success(f"✅ Provision générée avec succès!")
-                st.info(f"**Provision totale:** {total_provision:,.2f} €")
 
             except Exception as e:
                 st.error(f"Erreur lors de la génération: {str(e)}")
