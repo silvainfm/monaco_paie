@@ -1867,6 +1867,7 @@ class ChargesSocialesPDFGenerator:
                     rate_info = rates_csv.get(code, {})
                     organismes[org_code]['charges'][code] = {
                         'description': rate_info.get('description', code),
+                        'code_dsm': rate_info.get('code_dsm', ''),
                         'nbre_salarie': 0,
                         'base_cotisee': 0,
                         'taux_sal': rate_info.get('taux_sal', 0),
@@ -1902,7 +1903,7 @@ class ChargesSocialesPDFGenerator:
         return organismes
 
     def _load_rates(self) -> Dict:
-        """Charger les taux depuis le CSV pour avoir les descriptions"""
+        """Charger les taux depuis le CSV pour avoir les descriptions et codes DSM"""
         rates = {}
         csv_path = Path("config") / "payroll_rates.csv"
 
@@ -1917,6 +1918,7 @@ class ChargesSocialesPDFGenerator:
                         if code not in rates:
                             rates[code] = {
                                 'description': row.get('description', code),
+                                'code_dsm': row.get('code_dsm', ''),
                                 'taux_sal': 0,
                                 'taux_pat': 0
                             }
@@ -1984,8 +1986,11 @@ class ChargesSocialesPDFGenerator:
                 total_sal_org += montant_sal
                 total_pat_org += montant_pat
 
+                # Use code_dsm if available, otherwise use charge code
+                display_code = values.get('code_dsm', code) or code
+
                 data.append([
-                    f"{code}",
+                    f"{display_code}",
                     f"{values['description']}",
                     str(values['nbre_salarie']),
                     PDFStyles.format_currency(values['base_cotisee']),

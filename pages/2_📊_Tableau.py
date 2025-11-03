@@ -111,42 +111,6 @@ else:
 
 st.markdown("---")
 
-col1, col2 = st.columns(2)
-
-with col1:
-    st.subheader("Répartition par statut")
-    if 'statut_validation' in df.columns:
-        status_counts = df.group_by('statut_validation').agg(pl.count().alias('count'))
-        status_counts = status_counts.select([
-            pl.col('statut_validation').cast(pl.Utf8),
-            pl.col('count').cast(pl.Int64)
-        ])
-        st.bar_chart(status_counts, x='statut_validation', y='count')
-
-with col2:
-    st.subheader("Distribution des salaires nets")
-    if 'salaire_net' in df.columns and not df['salaire_net'].is_null().all():
-        # Optimized: use Polars expressions throughout
-        try:
-            hist_df = (
-                df.select(pl.col('salaire_net').drop_nulls())
-                .select(
-                    pl.col('salaire_net').qcut(10, labels=[f"{i}" for i in range(10)], allow_duplicates=True)
-                    .alias('bin')
-                )
-                .group_by('bin').agg(pl.len().alias('count'))
-                .sort('bin')
-                .select([
-                    pl.col('bin').cast(pl.Utf8),
-                    pl.col('count').cast(pl.Int64)
-                ])
-            )
-            st.bar_chart(hist_df, x='bin', y='count')
-        except Exception:
-            # Fallback to simple stats
-            st.info("Pas assez de données uniques")
-            st.dataframe(df.select(pl.col('salaire_net').drop_nulls().describe()))
-
 st.markdown("---")
 st.subheader("Employés avec cas particuliers")
 
