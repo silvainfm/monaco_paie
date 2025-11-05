@@ -1088,7 +1088,7 @@ class PTOProvisionPDFGenerator:
             ('TEXTCOLOR', (0, 0), (-1, -1), self.COLORS['primary_blue']),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
             ('LINEBELOW', (0, 0), (-1, -1), 1.5, self.COLORS['primary_blue']),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
         ]))
         elements.append(title_table)
         elements.append(Spacer(1, 0.3*cm))
@@ -2185,9 +2185,18 @@ class ChargesSocialesPDFGenerator:
                 # Use code_dsm if available, otherwise use charge code
                 display_code = values.get('code_dsm', code) or code
 
+                # Abbreviate base cotisée to CCSS or CMRC for common social charges
+                description = values['description']
+                if 'CCSS' in description.upper() or 'CAISSE DE COMPENSATION' in description.upper():
+                    base_cotisee_text = 'CCSS'
+                elif 'CMRC' in description.upper() or 'CAISSE MONEGASQUE' in description.upper():
+                    base_cotisee_text = 'CMRC'
+                else:
+                    base_cotisee_text = description
+
                 data.append([
                     f"{display_code}",
-                    f"{values['description']}",
+                    base_cotisee_text,
                     str(values['nbre_salarie']),
                     PDFStyles.format_currency(values['base_cotisee']),
                     f"{taux_sal:.2f}" if taux_sal > 0 else "",
@@ -2225,7 +2234,7 @@ class ChargesSocialesPDFGenerator:
         ])
 
         table = Table(data, colWidths=[
-            1.5*cm, 3.5*cm, 1.2*cm, 1.8*cm, 1.2*cm, 1.2*cm, 1.2*cm, 2*cm, 2*cm, 2*cm
+            1.15*cm, 4.25*cm, 1.3*cm, 1.88*cm, 1.2*cm, 1.2*cm, 1.2*cm, 2*cm, 2*cm, 2*cm
         ])
 
         # Style de base
