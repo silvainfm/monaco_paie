@@ -19,19 +19,38 @@ from services.pdf_generation import PDFGeneratorService
 from services.payslip_helpers import clean_employee_data_for_pdf
 
 def get_available_years(company_id: str) -> list:
-    """Get distinct years available for company from DB"""
-    conn = DataManager.get_connection()
-    try:
-        result = conn.execute("""
-            SELECT DISTINCT period_year
-            FROM payroll_data
-            WHERE company_id = ?
-                AND statut_validation = 'validé'
-            ORDER BY period_year DESC
-        """, [company_id]).fetchall()
-        return [row[0] for row in result] if result else []
-    finally:
-        conn.close()
+    """Get distinct years available for company from parquet files"""
+    from pathlib import Path
+    import polars as pl
+
+    consolidated_dir = Path("data/consolidated")
+
+    if not consolidated_dir.exists():
+        return []
+
+    years_set = set()
+
+    # Scan all year directories
+    for year_dir in consolidated_dir.iterdir():
+        if not year_dir.is_dir():
+            continue
+
+        # Look for parquet files for this company
+        pattern = f"{company_id}_*.parquet"
+        for parquet_file in year_dir.glob(pattern):
+            try:
+                # Read parquet and get distinct calculation_year values
+                df = pl.read_parquet(parquet_file)
+                if 'calculation_year' in df.columns and 'statut_validation' in df.columns:
+                    # Only include years with validated data
+                    validated_years = df.filter(
+                        pl.col('statut_validation') == 'true'
+                    ).select('calculation_year').unique().to_series().to_list()
+                    years_set.update(validated_years)
+            except:
+                continue
+
+    return sorted(list(years_set), reverse=True)
 
 st.set_page_config(page_title="PDF Generation", page_icon="📄", layout="wide")
 

@@ -2376,82 +2376,98 @@ class RecapPaiePDFGenerator:
         return pdf_buffer
 
     def _load_yearly_data(self, company_id: str, year: int) -> List[Dict]:
-        """Load and aggregate yearly data per employee"""
+        """Load and aggregate yearly data per employee from parquet files"""
         import json
-        import duckdb
+        import polars as pl
 
-        DB_PATH = Path("data") / "payroll.duckdb"
-        conn = duckdb.connect(str(DB_PATH))
+        consolidated_dir = Path("data/consolidated")
 
-        try:
-            # Query all months for the year, only validated employees
-            result = conn.execute("""
-                SELECT
-                    matricule,
-                    nom,
-                    prenom,
-                    period_year,
-                    period_month,
-                    salaire_brut,
-                    salaire_net,
-                    total_charges_salariales,
-                    total_charges_patronales,
-                    CAST(details_charges AS VARCHAR) as details_charges,
-                    net_imposable,
-                    pas_retenu
-                FROM payroll_data
-                WHERE company_id = ?
-                    AND period_year = ?
-                    AND statut_validation = 'validé'
-                ORDER BY nom, matricule, period_month
-            """, [company_id, year]).fetchall()
+        if not consolidated_dir.exists():
+            return []
 
-            if not result:
-                return []
+        # Collect all parquet files for this company across all year directories
+        all_dfs = []
 
-            # Aggregate by employee
-            employees = {}
+        for year_dir in consolidated_dir.iterdir():
+            if not year_dir.is_dir():
+                continue
 
-            for row in result:
-                matricule = row[0]
+            # Look for parquet files for this company
+            pattern = f"{company_id}_*.parquet"
+            for parquet_file in year_dir.glob(pattern):
+                try:
+                    df = pl.read_parquet(parquet_file)
 
-                if matricule not in employees:
-                    employees[matricule] = {
-                        'matricule': matricule,
-                        'nom': row[1] or '',
-                        'prenom': row[2] or '',
-                        'months': [],
-                        'total_brut': 0,
-                        'total_net': 0,
-                        'total_charges_sal': 0,
-                        'total_charges_pat': 0,
-                        'total_net_imposable': 0,
-                        'total_pas': 0,
-                        'rubriques': {},  # Aggregated salary lines
-                        'charges': {}  # Aggregated charges
-                    }
+                    # Filter by calculation_year and validated status
+                    if 'calculation_year' in df.columns and 'statut_validation' in df.columns:
+                        df_filtered = df.filter(
+                            (pl.col('calculation_year') == year) &
+                            (pl.col('statut_validation') == 'true')
+                        )
+                        if df_filtered.height > 0:
+                            all_dfs.append(df_filtered)
+                except:
+                    continue
 
-                # Accumulate totals
-                employees[matricule]['total_brut'] += row[5] or 0
-                employees[matricule]['total_net'] += row[6] or 0
-                employees[matricule]['total_charges_sal'] += row[7] or 0
-                employees[matricule]['total_charges_pat'] += row[8] or 0
-                employees[matricule]['total_net_imposable'] += row[10] or 0
-                employees[matricule]['total_pas'] += row[11] or 0
-                employees[matricule]['months'].append(row[4])
+        if not all_dfs:
+            return []
 
-                # Parse details_charges if available
-                if row[9]:
-                    try:
-                        details = json.loads(row[9])
-                        self._aggregate_charges(employees[matricule], details)
-                    except:
-                        pass
+        # Concatenate all dataframes
+        df_all = pl.concat(all_dfs)
 
-            return list(employees.values())
+        # Aggregate by employee
+        employees = {}
 
-        finally:
-            conn.close()
+        for row in df_all.iter_rows(named=True):
+            matricule = row.get('matricule')
+            if not matricule:
+                continue
+
+            if matricule not in employees:
+                employees[matricule] = {
+                    'matricule': matricule,
+                    'nom': row.get('nom') or '',
+                    'prenom': row.get('prenom') or '',
+                    'months': [],
+                    'total_brut': 0,
+                    'total_net': 0,
+                    'total_charges_sal': 0,
+                    'total_charges_pat': 0,
+                    'total_net_imposable': 0,
+                    'total_pas': 0,
+                    'rubriques': {},
+                    'charges': {}
+                }
+
+            # Accumulate totals
+            employees[matricule]['total_brut'] += row.get('salaire_brut') or 0
+            employees[matricule]['total_net'] += row.get('salaire_net') or 0
+            employees[matricule]['total_charges_sal'] += row.get('total_charges_salariales') or 0
+            employees[matricule]['total_charges_pat'] += row.get('total_charges_patronales') or 0
+            # Use salaire_net as fallback for net_imposable if not available
+            employees[matricule]['total_net_imposable'] += row.get('net_imposable', row.get('salaire_net', 0)) or 0
+            employees[matricule]['total_pas'] += row.get('pas_retenu', 0) or 0
+
+            # Track month
+            period_month = row.get('period_month')
+            if period_month:
+                employees[matricule]['months'].append(period_month)
+
+            # Parse details_charges if available
+            details_charges = row.get('details_charges')
+            if details_charges:
+                try:
+                    if isinstance(details_charges, str):
+                        details = json.loads(details_charges)
+                    elif isinstance(details_charges, dict):
+                        details = details_charges
+                    else:
+                        continue
+                    self._aggregate_charges(employees[matricule], details)
+                except:
+                    pass
+
+        return list(employees.values())
 
     def _aggregate_charges(self, emp_data: Dict, details: Dict):
         """Aggregate charges from monthly details into yearly totals"""
