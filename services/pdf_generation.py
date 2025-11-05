@@ -2131,7 +2131,7 @@ class ChargesSocialesPDFGenerator:
 
     def _create_charges_table(self, organismes: Dict) -> Table:
         """Créer le tableau des charges regroupées par organisme"""
-
+        
         # En-têtes
         data = [[
             Paragraph("<b>CODE</b>", self.styles['CustomSmall']),
@@ -2187,9 +2187,9 @@ class ChargesSocialesPDFGenerator:
 
                 # Abbreviate base cotisée to CCSS or CMRC for common social charges
                 description = values['description']
-                if 'CCSS' in description.upper() or 'CAISSE DE COMPENSATION' in description.upper():
+                if 'CCSS' in description.upper() or 'caisse de compensation' in description.lower():
                     base_cotisee_text = 'CCSS'
-                elif 'CMRC' in description.upper() or 'CAISSE MONEGASQUE' in description.upper():
+                elif 'CMRC' in description.upper() or 'caisse monégasque' in description.lower():
                     base_cotisee_text = 'CMRC'
                 else:
                     base_cotisee_text = description
@@ -2234,7 +2234,7 @@ class ChargesSocialesPDFGenerator:
         ])
 
         table = Table(data, colWidths=[
-            1.15*cm, 4.25*cm, 1.3*cm, 1.88*cm, 1.2*cm, 1.2*cm, 1.2*cm, 2*cm, 2*cm, 2*cm
+            1.15*cm, 4.4*cm, 1.3*cm, 1.85*cm, 1.2*cm, 1.2*cm, 1.2*cm, 1.95*cm, 1.95*cm, 1.95*cm
         ])
 
         # Style de base
@@ -2308,9 +2308,435 @@ class ChargesSocialesPDFGenerator:
 
         return Paragraph(footer_text, self.styles['CustomNormal'])
 
+class RecapPaiePDFGenerator:
+    """Générateur de PDF pour le récapitulatif annuel de paie"""
+
+    COLORS = {
+        'header_gray': colors.HexColor('#808080'),
+        'text_dark': colors.HexColor('#000000'),
+        'border_gray': colors.HexColor('#CCCCCC')
+    }
+
+    def __init__(self, company_info: Dict, logo_path: Optional[str] = None):
+        self.company_info = company_info
+        self.logo_path = logo_path
+        self.styles = PDFStyles.get_styles()
+
+    def generate_recap_paie(self, company_id: str, year: int,
+                           output_path: Optional[str] = None) -> io.BytesIO:
+        """
+        Générer récapitulatif annuel de paie (1 page par employé)
+
+        Args:
+            company_id: ID de l'entreprise
+            year: Année
+            output_path: Chemin de sortie (optionnel)
+
+        Returns:
+            io.BytesIO: PDF buffer
+        """
+        if output_path:
+            pdf_buffer = output_path
+        else:
+            pdf_buffer = io.BytesIO()
+
+        # Load yearly data
+        employees_data = self._load_yearly_data(company_id, year)
+
+        if not employees_data:
+            raise ValueError(f"No data for company {company_id} in year {year}")
+
+        # Sort by last name
+        employees_data = sorted(employees_data, key=lambda x: x.get('nom', '').upper())
+
+        doc = SimpleDocTemplate(
+            pdf_buffer,
+            pagesize=A4,
+            rightMargin=1.5*cm,
+            leftMargin=1.5*cm,
+            topMargin=1.5*cm,
+            bottomMargin=2*cm
+        )
+
+        story = []
+
+        # Generate 1 page per employee
+        for idx, emp_data in enumerate(employees_data):
+            if idx > 0:
+                story.append(PageBreak())
+
+            story.extend(self._create_employee_page(emp_data, year))
+
+        # Build with footer
+        doc.build(story, onFirstPage=self._add_footer, onLaterPages=self._add_footer)
+
+        if not output_path:
+            pdf_buffer.seek(0)
+
+        return pdf_buffer
+
+    def _load_yearly_data(self, company_id: str, year: int) -> List[Dict]:
+        """Load and aggregate yearly data per employee"""
+        import json
+        import duckdb
+
+        DB_PATH = Path("data") / "payroll.duckdb"
+        conn = duckdb.connect(str(DB_PATH))
+
+        try:
+            # Query all months for the year, only validated employees
+            result = conn.execute("""
+                SELECT
+                    matricule,
+                    nom,
+                    prenom,
+                    period_year,
+                    period_month,
+                    salaire_brut,
+                    salaire_net,
+                    total_charges_salariales,
+                    total_charges_patronales,
+                    CAST(details_charges AS VARCHAR) as details_charges,
+                    net_imposable,
+                    pas_retenu
+                FROM payroll_data
+                WHERE company_id = ?
+                    AND period_year = ?
+                    AND statut_validation = 'validé'
+                ORDER BY nom, matricule, period_month
+            """, [company_id, year]).fetchall()
+
+            if not result:
+                return []
+
+            # Aggregate by employee
+            employees = {}
+
+            for row in result:
+                matricule = row[0]
+
+                if matricule not in employees:
+                    employees[matricule] = {
+                        'matricule': matricule,
+                        'nom': row[1] or '',
+                        'prenom': row[2] or '',
+                        'months': [],
+                        'total_brut': 0,
+                        'total_net': 0,
+                        'total_charges_sal': 0,
+                        'total_charges_pat': 0,
+                        'total_net_imposable': 0,
+                        'total_pas': 0,
+                        'rubriques': {},  # Aggregated salary lines
+                        'charges': {}  # Aggregated charges
+                    }
+
+                # Accumulate totals
+                employees[matricule]['total_brut'] += row[5] or 0
+                employees[matricule]['total_net'] += row[6] or 0
+                employees[matricule]['total_charges_sal'] += row[7] or 0
+                employees[matricule]['total_charges_pat'] += row[8] or 0
+                employees[matricule]['total_net_imposable'] += row[10] or 0
+                employees[matricule]['total_pas'] += row[11] or 0
+                employees[matricule]['months'].append(row[4])
+
+                # Parse details_charges if available
+                if row[9]:
+                    try:
+                        details = json.loads(row[9])
+                        self._aggregate_charges(employees[matricule], details)
+                    except:
+                        pass
+
+            return list(employees.values())
+
+        finally:
+            conn.close()
+
+    def _aggregate_charges(self, emp_data: Dict, details: Dict):
+        """Aggregate charges from monthly details into yearly totals"""
+        charges_sal = details.get('charges_salariales', {})
+        charges_pat = details.get('charges_patronales', {})
+
+        for code, montant in (charges_sal.items() if isinstance(charges_sal, dict) else []):
+            if code not in emp_data['charges']:
+                emp_data['charges'][code] = {
+                    'salarial': 0,
+                    'patronal': 0,
+                    'count': 0
+                }
+            emp_data['charges'][code]['salarial'] += montant or 0
+            emp_data['charges'][code]['count'] += 1
+
+        for code, montant in (charges_pat.items() if isinstance(charges_pat, dict) else []):
+            if code not in emp_data['charges']:
+                emp_data['charges'][code] = {
+                    'salarial': 0,
+                    'patronal': 0,
+                    'count': 0
+                }
+            emp_data['charges'][code]['patronal'] += montant or 0
+
+    def _create_employee_page(self, emp_data: Dict, year: int) -> List:
+        """Create page content for one employee"""
+        elements = []
+
+        # Header
+        elements.extend(self._create_header(emp_data, year))
+        elements.append(Spacer(1, 0.3*cm))
+
+        # Main table
+        elements.append(self._create_recap_table(emp_data))
+        elements.append(Spacer(1, 0.5*cm))
+
+        # Footer with totals
+        elements.append(self._create_totals_footer(emp_data, year))
+
+        return elements
+
+    def _create_header(self, emp_data: Dict, year: int) -> List:
+        """Create page header"""
+        elements = []
+
+        # Title with gray background
+        title_style = ParagraphStyle(
+            'RecapTitle',
+            fontSize=14,
+            fontName='Helvetica-Bold',
+            alignment=TA_CENTER,
+            textColor=colors.white,
+            backColor=self.COLORS['header_gray'],
+            spaceAfter=6,
+            spaceBefore=6
+        )
+
+        title = Paragraph("Récapitulatif de paie", title_style)
+        elements.append(title)
+        elements.append(Spacer(1, 0.2*cm))
+
+        # Employee and establishment info
+        info_style = ParagraphStyle(
+            'RecapInfo',
+            fontSize=8,
+            alignment=TA_LEFT
+        )
+
+        matricule = emp_data.get('matricule', '')
+        info_text = f"Salarié(e) de {matricule} à {matricule}<br/>Etablissement(e) &lt;&lt;Tous&gt;&gt;"
+        elements.append(Paragraph(info_text, info_style))
+        elements.append(Spacer(1, 0.3*cm))
+
+        # Employee name box
+        nom = emp_data.get('nom', '').upper()
+        prenom = emp_data.get('prenom', '').title()
+        name_text = f"Salarié {matricule} {nom} {prenom}"
+
+        name_table = Table([[name_text]], colWidths=[17*cm])
+        name_table.setStyle(TableStyle([
+            ('BOX', (0, 0), (-1, -1), 1, colors.black),
+            ('LEFTPADDING', (0, 0), (-1, -1), 3),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ]))
+        elements.append(name_table)
+        elements.append(Spacer(1, 0.2*cm))
+
+        # Period
+        period_style = ParagraphStyle(
+            'RecapPeriod',
+            fontSize=9,
+            fontName='Helvetica-Bold',
+            alignment=TA_LEFT
+        )
+        period_text = f"Période de 01/01/{year} à 31/12/{year}"
+        elements.append(Paragraph(period_text, period_style))
+
+        return elements
+
+    def _create_recap_table(self, emp_data: Dict) -> Table:
+        """Create main recap table with rubriques and charges"""
+
+        # Header row
+        headers = ['RUBRIQUES', 'NB SALARIE', 'REMUNERATION', 'BASE',
+                   'TX SAL.', 'SALARIAL', 'TX PAT.', 'PATRONAL']
+
+        data = [headers]
+
+        # Salary lines (simplified - using aggregated totals)
+        # In real implementation, would parse monthly rubriques
+        nb_months = len(emp_data.get('months', []))
+
+        data.append([
+            '0011 Salaire Mensuel',
+            str(nb_months),
+            f"{emp_data['total_brut']:,.2f}",
+            '',
+            '',
+            '',
+            '',
+            ''
+        ])
+
+        # Total hours/brut
+        data.append([
+            'Total Heure payées',
+            str(nb_months),
+            f"{emp_data['total_brut']:,.2f}",
+            '',
+            '',
+            '',
+            '',
+            ''
+        ])
+
+        data.append([
+            'Total Heure trav./ Brut',
+            str(nb_months),
+            f"{emp_data['total_brut']:,.2f}",
+            '',
+            '',
+            '',
+            '',
+            ''
+        ])
+
+        # Charges sociales
+        for code, amounts in sorted(emp_data.get('charges', {}).items()):
+            base = amounts.get('salarial', 0) + amounts.get('patronal', 0)
+            if base == 0:
+                continue
+
+            data.append([
+                code,
+                str(amounts.get('count', nb_months)),
+                '',
+                f"{base:,.2f}" if base > 0 else '',
+                '',
+                f"{amounts.get('salarial', 0):,.2f}" if amounts.get('salarial', 0) > 0 else '',
+                '',
+                f"{amounts.get('patronal', 0):,.2f}" if amounts.get('patronal', 0) > 0 else ''
+            ])
+
+        # Total retenues
+        data.append([
+            'Total Retenues',
+            '',
+            '',
+            '',
+            '',
+            f"{emp_data['total_charges_sal']:,.2f}",
+            '',
+            f"{emp_data['total_charges_pat']:,.2f}"
+        ])
+
+        # Column widths
+        col_widths = [5.5*cm, 1.8*cm, 2.2*cm, 1.8*cm, 1.2*cm, 1.8*cm, 1.2*cm, 1.8*cm]
+
+        table = Table(data, colWidths=col_widths, repeatRows=1)
+
+        # Table style
+        table.setStyle(TableStyle([
+            # Header row
+            ('BACKGROUND', (0, 0), (-1, 0), self.COLORS['header_gray']),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 8),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+
+            # Data rows
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
+            ('ALIGN', (0, 1), (0, -1), 'LEFT'),  # RUBRIQUES left
+            ('ALIGN', (1, 1), (-1, -1), 'RIGHT'),  # Numbers right
+
+            # Grid
+            ('GRID', (0, 0), (-1, -1), 0.5, self.COLORS['border_gray']),
+            ('BOX', (0, 0), (-1, -1), 1, colors.black),
+
+            # Padding
+            ('LEFTPADDING', (0, 0), (-1, -1), 3),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+            ('TOPPADDING', (0, 0), (-1, -1), 2),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+
+            # Bold totals
+            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ]))
+
+        return table
+
+    def _create_totals_footer(self, emp_data: Dict, year: int) -> Table:
+        """Create footer with totals"""
+
+        nom = emp_data.get('nom', '').upper()
+        prenom = emp_data.get('prenom', '').title()
+        total_label = f"Total {nom} {prenom} Période de 01/01/{year} à 31/12/{year}"
+
+        # Calculate values
+        pas = emp_data.get('total_pas', 0)
+        brut_av_abatt = emp_data.get('total_brut', 0)
+        net_imposable = emp_data.get('total_net_imposable', 0)
+        net_a_payer = emp_data.get('total_net', 0)
+
+        data = [
+            [total_label],
+            [
+                Table([
+                    ['PAS', 'Brut av abatt.', 'Net imposable', 'Net à payer'],
+                    [f"{pas:,.2f}", f"{brut_av_abatt:,.2f}", f"{net_imposable:,.2f}", f"{net_a_payer:,.2f}"]
+                ], colWidths=[4.25*cm, 4.25*cm, 4.25*cm, 4.25*cm])
+            ]
+        ]
+
+        footer_table = Table(data, colWidths=[17*cm])
+        footer_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 9),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('BOX', (0, 0), (-1, -1), 1, colors.black),
+            ('GRID', (0, 0), (-1, -1), 0.5, self.COLORS['border_gray']),
+            ('LEFTPADDING', (0, 0), (-1, -1), 3),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ]))
+
+        return footer_table
+
+    def _add_footer(self, canvas_obj, doc):
+        """Add footer to each page"""
+        canvas_obj.saveState()
+
+        # Get current user
+        current_user = getpass.getuser()
+
+        # Footer text
+        footer_left = f"Imprimé le {datetime.now().strftime('%d/%m/%y à %H:%M')}"
+        footer_center = f"ht CEGID - Paie-GRH (licence Cegid Expert On"
+        footer_right = f"Page n° {doc.page}"
+        footer_user = f"Par {current_user}"
+        footer_company = "STARS AND BARS"  # Could be dynamic
+
+        canvas_obj.setFont('Helvetica', 7)
+
+        # Left
+        canvas_obj.drawString(1.5*cm, 1*cm, footer_left)
+        canvas_obj.drawString(1.5*cm, 0.7*cm, footer_user)
+
+        # Center
+        canvas_obj.drawString(8*cm, 1*cm, footer_center)
+        canvas_obj.drawString(8*cm, 0.7*cm, f"Version {datetime.now().strftime('%Y%m%d%H%M%S')} du {datetime.now().strftime('%d/%m/%Y')}")
+
+        # Right
+        canvas_obj.drawRightString(19.5*cm, 1*cm, footer_right)
+        canvas_obj.drawRightString(19.5*cm, 0.7*cm, footer_company)
+
+        canvas_obj.restoreState()
+
+
 class PDFGeneratorService:
     """Service principal pour gérer la génération de tous les PDFs"""
-    
+
     def __init__(self, company_info: Dict, logo_path: Optional[str] = None):
         """
         Initialiser le service de génération PDF
@@ -2327,6 +2753,7 @@ class PDFGeneratorService:
         self.journal_generator = PayJournalPDFGenerator(company_info, logo_path)
         self.pto_generator = PTOProvisionPDFGenerator(company_info, logo_path)
         self.charges_sociales_generator = ChargesSocialesPDFGenerator(company_info, logo_path)
+        self.recap_generator = RecapPaiePDFGenerator(company_info, logo_path)
     
     def generate_monthly_documents(self, employees_df: pl.DataFrame, 
                                   period: str, output_dir: Optional[Path] = None) -> Dict[str, any]:
@@ -2525,6 +2952,21 @@ class PDFGeneratorService:
             Buffer PDF de l'état des charges sociales
         """
         return self.charges_sociales_generator.generate_charges_sociales(employees_data, period)
+
+    def generate_recap_paie_pdf(self, company_id: str, year: int,
+                               output_path: Optional[str] = None) -> io.BytesIO:
+        """
+        Générer récapitulatif annuel de paie
+
+        Args:
+            company_id: ID de l'entreprise
+            year: Année
+            output_path: Chemin de sortie (optionnel)
+
+        Returns:
+            Buffer PDF du récapitulatif de paie
+        """
+        return self.recap_generator.generate_recap_paie(company_id, year, output_path)
 
 # Test function
 def test_pdf_generation():

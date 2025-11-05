@@ -18,6 +18,21 @@ from services.data_mgt import DataManager
 from services.pdf_generation import PDFGeneratorService
 from services.payslip_helpers import clean_employee_data_for_pdf
 
+def get_available_years(company_id: str) -> list:
+    """Get distinct years available for company from DB"""
+    conn = DataManager.get_connection()
+    try:
+        result = conn.execute("""
+            SELECT DISTINCT period_year
+            FROM payroll_data
+            WHERE company_id = ?
+                AND statut_validation = 'validé'
+            ORDER BY period_year DESC
+        """, [company_id]).fetchall()
+        return [row[0] for row in result] if result else []
+    finally:
+        conn.close()
+
 st.set_page_config(page_title="PDF Generation", page_icon="📄", layout="wide")
 
 # Render sidebar with company/period selection
@@ -63,157 +78,170 @@ st.subheader("Options de génération PDF")
 st.info(f"**{len(df)} employés** traités pour la période {st.session_state.current_period}")
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "📄 Bulletin individuel",
-    "📚 Tous les bulletins",
+    "📄 Bulletins de paie",
     "📊 Journal de paie",
     "💰 Provision CP",
-    "Charges Sociales"
+    "📈 Charges Sociales",
+    "📋 Récapitulatif de paie"
 ])
 
 with tab1:
-    st.info("📄 Générer le bulletin de paie d'un employé spécifique")
+    st.info("📄 Générer les bulletins de paie")
 
-    # Employee selection
-    employees = df.select(['matricule', 'nom', 'prenom']).to_dicts()
-    employee_options = [f"{emp.get('matricule', '')} - {emp.get('nom') or ''} {emp.get('prenom') or ''}" for emp in employees]
+    # Selection mode
+    generation_mode = st.radio(
+        "Mode de génération",
+        ["Bulletin individuel", "Tous les bulletins"],
+        horizontal=True,
+        key="bulletin_mode"
+    )
 
-    selected_employee = st.selectbox("Sélectionner un employé", employee_options)
+    if generation_mode == "Bulletin individuel":
+        st.markdown("---")
+        st.markdown("### 📄 Bulletin individuel")
 
-    col1, col2 = st.columns(2)
+        # Employee selection
+        employees = df.select(['matricule', 'nom', 'prenom']).to_dicts()
+        employee_options = [f"{emp.get('matricule', '')} - {emp.get('nom') or ''} {emp.get('prenom') or ''}" for emp in employees]
 
-    with col1:
-        if st.button("📄 Générer bulletin individuel", type="primary", use_container_width=True):
-            if selected_employee:
-                try:
-                    # Extract matricule from selection
-                    matricule = selected_employee.split(' - ')[0].strip()
-                    employee_row = df.filter(pl.col('matricule') == matricule)
+        selected_employee = st.selectbox("Sélectionner un employé", employee_options)
 
-                    if employee_row.is_empty():
-                        st.error(f"Employee {matricule} not found in data")
-                    else:
-                        employee_data = clean_employee_data_for_pdf(
-                            employee_row.to_dicts()[0]
-                        )
+        col1, col2 = st.columns(2)
 
-                        # Add period information for PDF generation
-                        last_day = calendar.monthrange(year, month)[1]
+        with col1:
+            if st.button("📄 Générer bulletin individuel", type="primary", use_container_width=True):
+                if selected_employee:
+                    try:
+                        # Extract matricule from selection
+                        matricule = selected_employee.split(' - ')[0].strip()
+                        employee_row = df.filter(pl.col('matricule') == matricule)
 
-                        employee_data['period_start'] = f"01/{month:02d}/{year}"
-                        employee_data['period_end'] = f"{last_day:02d}/{month:02d}/{year}"
-                        employee_data['payment_date'] = f"{last_day:02d}/{month:02d}/{year}"
-
-                        # Generate PDF
-                        with st.spinner("Génération du bulletin en cours..."):
-                            pdf_buffer = pdf_service.generate_email_ready_paystub(
-                                employee_data,
-                                f"{month:02d}-{year}"
+                        if employee_row.is_empty():
+                            st.error(f"Employee {matricule} not found in data")
+                        else:
+                            employee_data = clean_employee_data_for_pdf(
+                                employee_row.to_dicts()[0]
                             )
 
-                        # Store in session state
-                        st.session_state.generated_pdfs[pdf_key][f'bulletin_{matricule}'] = {
-                            'buffer': pdf_buffer.getvalue(),
-                            'filename': f"bulletin_{matricule}_{year}_{month:02d}.pdf",
-                            'generated_at': datetime.now()
-                        }
+                            # Add period information for PDF generation
+                            last_day = calendar.monthrange(year, month)[1]
 
-                        st.success("✅ Bulletin généré avec succès!")
+                            employee_data['period_start'] = f"01/{month:02d}/{year}"
+                            employee_data['period_end'] = f"{last_day:02d}/{month:02d}/{year}"
+                            employee_data['payment_date'] = f"{last_day:02d}/{month:02d}/{year}"
+
+                            # Generate PDF
+                            with st.spinner("Génération du bulletin en cours..."):
+                                pdf_buffer = pdf_service.generate_email_ready_paystub(
+                                    employee_data,
+                                    f"{month:02d}-{year}"
+                                )
+
+                            # Store in session state
+                            st.session_state.generated_pdfs[pdf_key][f'bulletin_{matricule}'] = {
+                                'buffer': pdf_buffer.getvalue(),
+                                'filename': f"bulletin_{matricule}_{year}_{month:02d}.pdf",
+                                'generated_at': datetime.now()
+                            }
+
+                            st.success("✅ Bulletin généré avec succès!")
+
+                    except Exception as e:
+                        st.error(f"Erreur lors de la génération: {str(e)}")
+
+        with col2:
+            # Check if individual bulletin exists in session state
+            bulletin_key = f"bulletin_{selected_employee.split(' - ')[0]}" if selected_employee else None
+            if bulletin_key and bulletin_key in st.session_state.generated_pdfs[pdf_key]:
+                pdf_data = st.session_state.generated_pdfs[pdf_key][bulletin_key]
+                st.download_button(
+                    label="💾 Télécharger le bulletin",
+                    data=pdf_data['buffer'],
+                    file_name=pdf_data['filename'],
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+
+    else:  # Tous les bulletins
+        st.markdown("---")
+        st.markdown("### 📚 Tous les bulletins")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Bulletins à générer", len(df))
+        with col2:
+            total_size_est = len(df) * 0.2  # Estimation 200KB par bulletin
+            st.metric("Taille estimée", f"{total_size_est:.1f} MB")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            if st.button("📚 Générer tous les bulletins", type="primary", use_container_width=True):
+                try:
+                    with st.spinner("Génération de tous les bulletins en cours..."):
+                        # Add period information to all employees
+                        last_day = calendar.monthrange(year, month)[1]
+
+                        df_copy = df.with_columns([
+                            pl.lit(f"01/{month:02d}/{year}").alias('period_start'),
+                            pl.lit(f"{last_day:02d}/{month:02d}/{year}").alias('period_end'),
+                            pl.lit(f"{last_day:02d}/{month:02d}/{year}").alias('payment_date')
+                        ])
+
+                        # Clean each row before generating PDFs
+                        cleaned_data = []
+                        for row in df_copy.iter_rows(named=True):
+                            cleaned_data.append(clean_employee_data_for_pdf(row))
+
+                        # Create DataFrame with schema inference but exclude Object columns
+                        df_cleaned = pl.DataFrame(cleaned_data, infer_schema_length=1)
+
+                        # Drop any Object dtype columns that can't be serialized
+                        object_cols = [col for col in df_cleaned.columns if df_cleaned[col].dtype == pl.Object]
+                        if object_cols:
+                            df_cleaned = df_cleaned.drop(object_cols)
+
+                        documents = pdf_service.generate_monthly_documents(df_cleaned, f"{month:02d}-{year}")
+
+                        if 'paystubs' in documents:
+                            # Create a zip file with all paystubs
+                            zip_buffer = io.BytesIO()
+                            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                                for paystub in documents['paystubs']:
+                                    mat = paystub.get('matricule', '')
+                                    nom = paystub.get('nom') or ''
+                                    prenom = paystub.get('prenom') or ''
+                                    filename = f"bulletin_{mat}_{nom}_{prenom}.pdf"
+                                    zip_file.writestr(filename, paystub['buffer'].getvalue())
+
+                            # Store in session state
+                            st.session_state.generated_pdfs[pdf_key]['all_bulletins'] = {
+                                'buffer': zip_buffer.getvalue(),
+                                'filename': f"bulletins_{st.session_state.current_company}_{year}_{month:02d}.zip",
+                                'generated_at': datetime.now(),
+                                'count': len(documents['paystubs'])
+                            }
+
+                            st.success(f"✅ {len(documents['paystubs'])} bulletins générés avec succès!")
+                        else:
+                            st.error("Erreur lors de la génération des bulletins")
 
                 except Exception as e:
                     st.error(f"Erreur lors de la génération: {str(e)}")
 
-    with col2:
-        # Check if individual bulletin exists in session state
-        bulletin_key = f"bulletin_{selected_employee.split(' - ')[0]}" if selected_employee else None
-        if bulletin_key and bulletin_key in st.session_state.generated_pdfs[pdf_key]:
-            pdf_data = st.session_state.generated_pdfs[pdf_key][bulletin_key]
-            st.download_button(
-                label="💾 Télécharger le bulletin",
-                data=pdf_data['buffer'],
-                file_name=pdf_data['filename'],
-                mime="application/pdf",
-                use_container_width=True
-            )
+        with col2:
+            # Check if all bulletins exist in session state
+            if 'all_bulletins' in st.session_state.generated_pdfs[pdf_key]:
+                pdf_data = st.session_state.generated_pdfs[pdf_key]['all_bulletins']
+                st.download_button(
+                    label=f"💾 Télécharger {pdf_data.get('count', '')} bulletins (ZIP)",
+                    data=pdf_data['buffer'],
+                    file_name=pdf_data['filename'],
+                    mime="application/zip",
+                    use_container_width=True
+                )
 
 with tab2:
-    st.info("📚 Générer tous les bulletins de paie")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Bulletins à générer", len(df))
-    with col2:
-        total_size_est = len(df) * 0.2  # Estimation 200KB par bulletin
-        st.metric("Taille estimée", f"{total_size_est:.1f} MB")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        if st.button("📚 Générer tous les bulletins", type="primary", use_container_width=True):
-            try:
-                with st.spinner("Génération de tous les bulletins en cours..."):
-                    # Add period information to all employees
-                    last_day = calendar.monthrange(year, month)[1]
-
-                    df_copy = df.with_columns([
-                        pl.lit(f"01/{month:02d}/{year}").alias('period_start'),
-                        pl.lit(f"{last_day:02d}/{month:02d}/{year}").alias('period_end'),
-                        pl.lit(f"{last_day:02d}/{month:02d}/{year}").alias('payment_date')
-                    ])
-
-                    # Clean each row before generating PDFs
-                    cleaned_data = []
-                    for row in df_copy.iter_rows(named=True):
-                        cleaned_data.append(clean_employee_data_for_pdf(row))
-
-                    # Create DataFrame with schema inference but exclude Object columns
-                    df_cleaned = pl.DataFrame(cleaned_data, infer_schema_length=1)
-
-                    # Drop any Object dtype columns that can't be serialized
-                    object_cols = [col for col in df_cleaned.columns if df_cleaned[col].dtype == pl.Object]
-                    if object_cols:
-                        df_cleaned = df_cleaned.drop(object_cols)
-
-                    documents = pdf_service.generate_monthly_documents(df_cleaned, f"{month:02d}-{year}")
-
-                    if 'paystubs' in documents:
-                        # Create a zip file with all paystubs
-                        zip_buffer = io.BytesIO()
-                        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-                            for paystub in documents['paystubs']:
-                                mat = paystub.get('matricule', '')
-                                nom = paystub.get('nom') or ''
-                                prenom = paystub.get('prenom') or ''
-                                filename = f"bulletin_{mat}_{nom}_{prenom}.pdf"
-                                zip_file.writestr(filename, paystub['buffer'].getvalue())
-
-                        # Store in session state
-                        st.session_state.generated_pdfs[pdf_key]['all_bulletins'] = {
-                            'buffer': zip_buffer.getvalue(),
-                            'filename': f"bulletins_{st.session_state.current_company}_{year}_{month:02d}.zip",
-                            'generated_at': datetime.now(),
-                            'count': len(documents['paystubs'])
-                        }
-
-                        st.success(f"✅ {len(documents['paystubs'])} bulletins générés avec succès!")
-                    else:
-                        st.error("Erreur lors de la génération des bulletins")
-
-            except Exception as e:
-                st.error(f"Erreur lors de la génération: {str(e)}")
-
-    with col2:
-        # Check if all bulletins exist in session state
-        if 'all_bulletins' in st.session_state.generated_pdfs[pdf_key]:
-            pdf_data = st.session_state.generated_pdfs[pdf_key]['all_bulletins']
-            st.download_button(
-                label=f"💾 Télécharger {pdf_data.get('count', '')} bulletins (ZIP)",
-                data=pdf_data['buffer'],
-                file_name=pdf_data['filename'],
-                mime="application/zip",
-                use_container_width=True
-            )
-
-with tab3:
     st.info("📊 Générer le journal de paie")
 
     # Show summary stats
@@ -264,7 +292,7 @@ with tab3:
                 use_container_width=True
             )
 
-with tab4:
+with tab3:
     st.info("💰 Générer la provision pour congés payés")
 
     st.markdown("""
@@ -319,7 +347,7 @@ with tab4:
                 use_container_width=True
             )
 
-with tab5:
+with tab4:
     st.info("📈 Générer l'état des charges sociales")
 
     col1, col2 = st.columns(2)
@@ -382,6 +410,75 @@ with tab5:
     - Format réglementaire Monaco
     """)
 
+with tab5:
+    st.info("📋 Générer le récapitulatif annuel de paie")
+
+    st.markdown("""
+    **Récapitulatif de paie annuel:**
+    - 1 page par employé avec cumuls annuels
+    - Tous les employés validés de l'année
+    - Rubriques de salaire agrégées
+    - Détail des charges sociales
+    - Format réglementaire Monaco
+    """)
+
+    # Get available years from DB
+    available_years = get_available_years(st.session_state.current_company)
+
+    if not available_years:
+        st.warning("Aucune année disponible avec données validées pour cette entreprise.")
+        st.stop()
+
+    # Year selector - use current year as default if available, else most recent
+    current_year = year
+    default_year = current_year if current_year in available_years else available_years[0]
+
+    year_selector = st.selectbox(
+        "Année du récapitulatif",
+        options=available_years,
+        index=available_years.index(default_year) if default_year in available_years else 0
+    )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("📋 Générer récapitulatif annuel", type="primary", use_container_width=True):
+            try:
+                with st.spinner(f"Génération du récapitulatif {year_selector}..."):
+                    recap_buffer = pdf_service.generate_recap_paie_pdf(
+                        company_id=st.session_state.current_company,
+                        year=year_selector
+                    )
+
+                # Store in session state
+                st.session_state.generated_pdfs[pdf_key]['recap_paie'] = {
+                    'buffer': recap_buffer.getvalue(),
+                    'filename': f"recap_paie_{st.session_state.current_company}_{year_selector}.pdf",
+                    'generated_at': datetime.now(),
+                    'year': year_selector
+                }
+
+                st.success(f"✅ Récapitulatif {year_selector} généré avec succès!")
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"Erreur lors de la génération: {str(e)}")
+                import traceback
+                st.error(traceback.format_exc())
+
+    with col2:
+        # Check if recap exists in session state
+        if 'recap_paie' in st.session_state.generated_pdfs[pdf_key]:
+            pdf_data = st.session_state.generated_pdfs[pdf_key]['recap_paie']
+            st.info(f"**Année:** {pdf_data.get('year', year_selector)}")
+            st.download_button(
+                label="💾 Télécharger récapitulatif annuel",
+                data=pdf_data['buffer'],
+                file_name=pdf_data['filename'],
+                mime="application/pdf",
+                use_container_width=True
+            )
+
 # Add some helpful information at the bottom
 st.markdown("---")
 
@@ -397,6 +494,7 @@ st.info("""
 - Les bulletins individuels sont générés au format réglementaire Monaco
 - Le journal de paie contient les écritures comptables
 - La provision CP est calculée selon la législation sociale monégasque
+- Le récapitulatif annuel agrège tous les mois validés (1 page par employé)
 - Tous les documents sont horodatés et numérotés
 - Les PDFs générés restent disponibles jusqu'au changement de période
 """)
