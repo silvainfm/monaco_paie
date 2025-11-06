@@ -252,7 +252,7 @@ def main_app():
     📥 **Import** - Importer les données depuis Excel/CSV
     ⚙️ **Traitement** - Traiter les paies avec agent intelligent
     ✅ **Validation** - Valider et modifier les bulletins
-    📄 **PDF Generation** - Générer bulletins, journaux, provisions
+    📄 **PDFs** - Générer bulletins, journaux, provisions
     📧 **Email** - Envoyer les bulletins par email
     📤 **Export** - Exporter les résultats vers Excel
     📋 **DSM** - Déclarations sociales Monaco (XML)

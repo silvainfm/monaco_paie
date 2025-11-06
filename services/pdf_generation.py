@@ -2311,10 +2311,15 @@ class ChargesSocialesPDFGenerator:
 class RecapPaiePDFGenerator:
     """Générateur de PDF pour le récapitulatif annuel de paie"""
 
+    # Color scheme matching paystubs - blue tones
     COLORS = {
-        'header_gray': colors.HexColor('#808080'),
-        'text_dark': colors.HexColor('#000000'),
-        'border_gray': colors.HexColor('#CCCCCC')
+        'primary_blue': colors.HexColor('#1e3a8a'),      # Dark blue for headers
+        'secondary_blue': colors.HexColor('#3b82f6'),    # Medium blue for accents
+        'light_blue': colors.HexColor('#dbeafe'),        # Light blue for backgrounds
+        'very_light_blue': colors.HexColor('#f0f9ff'),   # Very light blue
+        'text_dark': colors.HexColor('#1e293b'),         # Dark text
+        'text_gray': colors.HexColor('#64748b'),         # Gray text
+        'border_gray': colors.HexColor('#e2e8f0')        # Light gray for borders
     }
 
     def __init__(self, company_info: Dict, logo_path: Optional[str] = None):
@@ -2339,6 +2344,9 @@ class RecapPaiePDFGenerator:
             pdf_buffer = output_path
         else:
             pdf_buffer = io.BytesIO()
+
+        # Load client company name
+        self.client_company_name = self._load_company_name(company_id)
 
         # Load yearly data
         employees_data = self._load_yearly_data(company_id, year)
@@ -2374,6 +2382,26 @@ class RecapPaiePDFGenerator:
             pdf_buffer.seek(0)
 
         return pdf_buffer
+
+    def _load_company_name(self, company_id: str) -> str:
+        """Load company name from companies.parquet"""
+        import polars as pl
+
+        companies_file = Path("data/companies/companies.parquet")
+
+        if not companies_file.exists():
+            return company_id.replace('_', ' ').upper()
+
+        try:
+            df = pl.read_parquet(companies_file)
+            company_row = df.filter(pl.col('id') == company_id)
+
+            if company_row.height > 0:
+                return company_row.select('name').item()
+            else:
+                return company_id.replace('_', ' ').upper()
+        except:
+            return company_id.replace('_', ' ').upper()
 
     def _load_yearly_data(self, company_id: str, year: int) -> List[Dict]:
         """Load and aggregate yearly data per employee from parquet files"""
@@ -2514,27 +2542,30 @@ class RecapPaiePDFGenerator:
         """Create page header"""
         elements = []
 
-        # Title with gray background
-        title_style = ParagraphStyle(
-            'RecapTitle',
-            fontSize=14,
-            fontName='Helvetica-Bold',
-            alignment=TA_CENTER,
-            textColor=colors.white,
-            backColor=self.COLORS['header_gray'],
-            spaceAfter=6,
-            spaceBefore=6
-        )
+        # Title with blue background using Table for full encapsulation
+        title_table = Table([["Récapitulatif de paie"]], colWidths=[16.3*cm])
+        title_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), self.COLORS['primary_blue']),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.white),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 14),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('LEFTPADDING', (0, 0), (-1, -1), 5),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+        ]))
 
-        title = Paragraph("Récapitulatif de paie", title_style)
-        elements.append(title)
+        elements.append(title_table)
         elements.append(Spacer(1, 0.2*cm))
 
         # Employee and establishment info
         info_style = ParagraphStyle(
             'RecapInfo',
             fontSize=8,
-            alignment=TA_LEFT
+            alignment=TA_LEFT,
+            textColor=self.COLORS['text_gray']
         )
 
         matricule = emp_data.get('matricule', '')
@@ -2547,9 +2578,12 @@ class RecapPaiePDFGenerator:
         prenom = emp_data.get('prenom', '').title()
         name_text = f"Salarié {matricule} {nom} {prenom}"
 
-        name_table = Table([[name_text]], colWidths=[17*cm])
+        name_table = Table([[name_text]], colWidths=[16.3*cm])
         name_table.setStyle(TableStyle([
-            ('BOX', (0, 0), (-1, -1), 1, colors.black),
+            ('BOX', (0, 0), (-1, -1), 1, self.COLORS['primary_blue']),
+            ('BACKGROUND', (0, 0), (-1, -1), self.COLORS['very_light_blue']),
+            ('TEXTCOLOR', (0, 0), (-1, -1), self.COLORS['text_dark']),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
             ('LEFTPADDING', (0, 0), (-1, -1), 3),
             ('RIGHTPADDING', (0, 0), (-1, -1), 3),
             ('TOPPADDING', (0, 0), (-1, -1), 3),
@@ -2563,7 +2597,8 @@ class RecapPaiePDFGenerator:
             'RecapPeriod',
             fontSize=9,
             fontName='Helvetica-Bold',
-            alignment=TA_LEFT
+            alignment=TA_LEFT,
+            textColor=self.COLORS['text_dark']
         )
         period_text = f"Période de 01/01/{year} à 31/12/{year}"
         elements.append(Paragraph(period_text, period_style))
@@ -2646,15 +2681,15 @@ class RecapPaiePDFGenerator:
             f"{emp_data['total_charges_pat']:,.2f}"
         ])
 
-        # Column widths
-        col_widths = [5.5*cm, 1.8*cm, 2.2*cm, 1.8*cm, 1.2*cm, 1.8*cm, 1.2*cm, 1.8*cm]
+        # Column widths - reduced RUBRIQUES and BASE, increased numeric columns
+        col_widths = [4.2*cm, 1.8*cm, 2.4*cm, 1.4*cm, 1.2*cm, 2.0*cm, 1.2*cm, 2.1*cm]
 
         table = Table(data, colWidths=col_widths, repeatRows=1)
 
         # Table style
         table.setStyle(TableStyle([
             # Header row
-            ('BACKGROUND', (0, 0), (-1, 0), self.COLORS['header_gray']),
+            ('BACKGROUND', (0, 0), (-1, 0), self.COLORS['primary_blue']),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, 0), 8),
@@ -2662,12 +2697,13 @@ class RecapPaiePDFGenerator:
 
             # Data rows
             ('FONTSIZE', (0, 1), (-1, -1), 8),
+            ('TEXTCOLOR', (0, 1), (-1, -1), self.COLORS['text_dark']),
             ('ALIGN', (0, 1), (0, -1), 'LEFT'),  # RUBRIQUES left
             ('ALIGN', (1, 1), (-1, -1), 'RIGHT'),  # Numbers right
 
             # Grid
             ('GRID', (0, 0), (-1, -1), 0.5, self.COLORS['border_gray']),
-            ('BOX', (0, 0), (-1, -1), 1, colors.black),
+            ('BOX', (0, 0), (-1, -1), 1.5, self.COLORS['primary_blue']),
 
             # Padding
             ('LEFTPADDING', (0, 0), (-1, -1), 3),
@@ -2677,6 +2713,7 @@ class RecapPaiePDFGenerator:
 
             # Bold totals
             ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+            ('BACKGROUND', (0, -1), (-1, -1), self.COLORS['light_blue']),
         ]))
 
         return table
@@ -2694,23 +2731,36 @@ class RecapPaiePDFGenerator:
         net_imposable = emp_data.get('total_net_imposable', 0)
         net_a_payer = emp_data.get('total_net', 0)
 
+        # Inner table with values (match main table width of 16.3cm)
+        inner_table = Table([
+            ['PAS', 'Brut av abatt.', 'Net imposable', 'Net à payer'],
+            [f"{pas:,.2f}", f"{brut_av_abatt:,.2f}", f"{net_imposable:,.2f}", f"{net_a_payer:,.2f}"]
+        ], colWidths=[4.075*cm, 4.075*cm, 4.075*cm, 4.075*cm])
+
+        inner_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), self.COLORS['primary_blue']),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 8),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('TEXTCOLOR', (0, 1), (-1, 1), self.COLORS['text_dark']),
+            ('FONTNAME', (0, 1), (-1, 1), 'Helvetica-Bold'),
+            ('GRID', (0, 0), (-1, -1), 0.5, self.COLORS['border_gray']),
+        ]))
+
         data = [
             [total_label],
-            [
-                Table([
-                    ['PAS', 'Brut av abatt.', 'Net imposable', 'Net à payer'],
-                    [f"{pas:,.2f}", f"{brut_av_abatt:,.2f}", f"{net_imposable:,.2f}", f"{net_a_payer:,.2f}"]
-                ], colWidths=[4.25*cm, 4.25*cm, 4.25*cm, 4.25*cm])
-            ]
+            [inner_table]
         ]
 
-        footer_table = Table(data, colWidths=[17*cm])
+        footer_table = Table(data, colWidths=[16.3*cm])
         footer_table.setStyle(TableStyle([
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, 0), 9),
+            ('TEXTCOLOR', (0, 0), (-1, 0), self.COLORS['text_dark']),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('BOX', (0, 0), (-1, -1), 1, colors.black),
-            ('GRID', (0, 0), (-1, -1), 0.5, self.COLORS['border_gray']),
+            ('BOX', (0, 0), (-1, -1), 1.5, self.COLORS['primary_blue']),
+            ('BACKGROUND', (0, 0), (-1, 0), self.COLORS['very_light_blue']),
             ('LEFTPADDING', (0, 0), (-1, -1), 3),
             ('RIGHTPADDING', (0, 0), (-1, -1), 3),
             ('TOPPADDING', (0, 0), (-1, -1), 3),
@@ -2728,19 +2778,18 @@ class RecapPaiePDFGenerator:
 
         # Footer text
         footer_left = f"Imprimé le {datetime.now().strftime('%d/%m/%y à %H:%M')}"
-        footer_center = f"ht CEGID - Paie-GRH (licence Cegid Expert On"
         footer_right = f"Page n° {doc.page}"
         footer_user = f"Par {current_user}"
-        footer_company = "STARS AND BARS"  # Could be dynamic
+        footer_company = getattr(self, 'client_company_name', 'COMPANY NAME').upper()
 
         canvas_obj.setFont('Helvetica', 7)
+        canvas_obj.setFillColor(self.COLORS['text_gray'])
 
         # Left
         canvas_obj.drawString(1.5*cm, 1*cm, footer_left)
         canvas_obj.drawString(1.5*cm, 0.7*cm, footer_user)
 
         # Center
-        canvas_obj.drawString(8*cm, 1*cm, footer_center)
         canvas_obj.drawString(8*cm, 0.7*cm, f"Version {datetime.now().strftime('%Y%m%d%H%M%S')} du {datetime.now().strftime('%d/%m/%Y')}")
 
         # Right
