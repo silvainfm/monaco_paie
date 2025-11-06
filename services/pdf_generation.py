@@ -23,6 +23,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus.doctemplate import BaseDocTemplate
 import polars as pl
+import json
 from datetime import datetime, date, timedelta
 from pathlib import Path
 import io
@@ -2368,12 +2369,18 @@ class RecapPaiePDFGenerator:
 
         story = []
 
+        # Calculate matricule range for first page header
+        matricules = [emp.get('matricule', '') for emp in employees_data if emp.get('matricule')]
+        matricule_range = (matricules[0], matricules[-1]) if matricules else ('', '')
+
         # Generate 1 page per employee
         for idx, emp_data in enumerate(employees_data):
             if idx > 0:
                 story.append(PageBreak())
 
-            story.extend(self._create_employee_page(emp_data, year))
+            # Only show matricule range on first page
+            is_first_page = (idx == 0)
+            story.extend(self._create_employee_page(emp_data, year, is_first_page, matricule_range))
 
         # Build with footer
         doc.build(story, onFirstPage=self._add_footer, onLaterPages=self._add_footer)
@@ -2405,8 +2412,6 @@ class RecapPaiePDFGenerator:
 
     def _load_yearly_data(self, company_id: str, year: int) -> List[Dict]:
         """Load and aggregate yearly data per employee from parquet files"""
-        import json
-        import polars as pl
 
         consolidated_dir = Path("data/consolidated")
 
@@ -2521,12 +2526,13 @@ class RecapPaiePDFGenerator:
                 }
             emp_data['charges'][code]['patronal'] += montant or 0
 
-    def _create_employee_page(self, emp_data: Dict, year: int) -> List:
+    def _create_employee_page(self, emp_data: Dict, year: int, is_first_page: bool = False,
+                             matricule_range: tuple = ('', '')) -> List:
         """Create page content for one employee"""
         elements = []
 
         # Header
-        elements.extend(self._create_header(emp_data, year))
+        elements.extend(self._create_header(emp_data, year, is_first_page, matricule_range))
         elements.append(Spacer(1, 0.3*cm))
 
         # Main table
@@ -2538,12 +2544,13 @@ class RecapPaiePDFGenerator:
 
         return elements
 
-    def _create_header(self, emp_data: Dict, year: int) -> List:
+    def _create_header(self, emp_data: Dict, year: int, is_first_page: bool = False,
+                      matricule_range: tuple = ('', '')) -> List:
         """Create page header"""
         elements = []
 
         # Title with blue background using Table for full encapsulation
-        title_table = Table([["Récapitulatif de paie"]], colWidths=[16.3*cm])
+        title_table = Table([["Récapitulatif de paie"]], colWidths=[16.3*cm], rowHeights=[0.8*cm])
         title_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, -1), self.COLORS['primary_blue']),
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.white),
@@ -2551,29 +2558,31 @@ class RecapPaiePDFGenerator:
             ('FONTSIZE', (0, 0), (-1, -1), 14),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('TOPPADDING', (0, 0), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-            ('LEFTPADDING', (0, 0), (-1, -1), 5),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ('TOPPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
         ]))
 
         elements.append(title_table)
         elements.append(Spacer(1, 0.2*cm))
 
-        # Employee and establishment info
-        info_style = ParagraphStyle(
-            'RecapInfo',
-            fontSize=8,
-            alignment=TA_LEFT,
-            textColor=self.COLORS['text_gray']
-        )
+        # Employee and establishment info (only on first page)
+        if is_first_page:
+            info_style = ParagraphStyle(
+                'RecapInfo',
+                fontSize=8,
+                alignment=TA_LEFT,
+                textColor=self.COLORS['text_gray']
+            )
 
-        matricule = emp_data.get('matricule', '')
-        info_text = f"Salarié(e) de {matricule} à {matricule}<br/>Etablissement(e) &lt;&lt;Tous&gt;&gt;"
-        elements.append(Paragraph(info_text, info_style))
-        elements.append(Spacer(1, 0.3*cm))
+            matricule_start, matricule_end = matricule_range
+            info_text = f"Salarié(e) de {matricule_start} à {matricule_end}<br/>Etablissement(e) &lt;&lt;Tous&gt;&gt;"
+            elements.append(Paragraph(info_text, info_style))
+            elements.append(Spacer(1, 0.3*cm))
 
         # Employee name box
+        matricule = emp_data.get('matricule', '')
         nom = emp_data.get('nom', '').upper()
         prenom = emp_data.get('prenom', '').title()
         name_text = f"Salarié {matricule} {nom} {prenom}"
