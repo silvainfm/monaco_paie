@@ -2807,7 +2807,6 @@ class RecapPaiePDFGenerator:
 
         canvas_obj.restoreState()
 
-
 class PDFGeneratorService:
     """Service principal pour gérer la génération de tous les PDFs"""
 
