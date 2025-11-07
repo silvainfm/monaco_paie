@@ -20,7 +20,8 @@ from services.payslip_helpers import (
     safe_get_numeric,
     log_modification,
     recalculate_employee_payslip,
-    _show_read_only_validation
+    _show_read_only_validation,
+    check_and_restart_time_tracking
 )
 
 st.set_page_config(page_title="Validation", page_icon="✅", layout="wide")
@@ -32,6 +33,9 @@ st.header("✅ Validation et Modification des Paies")
 
 if not require_company_and_period():
     st.stop()
+
+# Start time tracking for this company/period
+check_and_restart_time_tracking()
 
 # CHECK PERIOD EDIT PERMISSION
 is_new_company = AuthManager.is_new_company(st.session_state.current_company)

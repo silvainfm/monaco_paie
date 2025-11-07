@@ -323,7 +323,7 @@ def safe_get_numeric(row: Dict, field: str, default: float = 0.0) -> float:
 # 3. View reports in audit_log_page() under "Suivi du Temps" tab
 #
 # Time tracking auto-starts when company/period selected, auto-stops when
-# switching companies or exiting. Sessions < 5 seconds are ignored.
+# switching companies or exiting. Sessions < 10 seconds are ignored.
 #
 # ============================================================================
 
@@ -393,8 +393,8 @@ def stop_time_tracking():
         start_time = st.session_state.time_tracking_start
         duration = (end_time - start_time).total_seconds()
 
-        # Only log if session was > 5 seconds (avoid accidental clicks)
-        if duration > 5:
+        # Only log if session was > 10 seconds (avoid accidental clicks)
+        if duration > 10:
             log_time_entry(
                 user=st.session_state.get('user', 'unknown'),
                 company=st.session_state.time_tracking_company,

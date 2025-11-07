@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Tuple
 # Import services
 from services.data_mgt import DataManager, DataConsolidation
 from services.payroll_system import IntegratedPayrollSystem
+from services.payslip_helpers import stop_time_tracking
 
 
 def get_payroll_system():
@@ -116,6 +117,8 @@ def render_sidebar():
         st.markdown("---")
 
         if st.button("Déconnexion", use_container_width=True):
+            # Stop time tracking before clearing session
+            stop_time_tracking()
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
             st.rerun()

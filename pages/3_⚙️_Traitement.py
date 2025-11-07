@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from services.shared_utils import require_company_and_period, get_payroll_system, render_sidebar
 from services.data_mgt import DataManager
 from services.edge_case_agent import EdgeCaseAgent
+from services.payslip_helpers import check_and_restart_time_tracking
 
 st.set_page_config(page_title="Processing", page_icon="⚙️", layout="wide")
 
@@ -23,6 +24,9 @@ st.markdown("## Traitement des paies")
 
 if not require_company_and_period():
     st.stop()
+
+# Start time tracking for this company/period
+check_and_restart_time_tracking()
 
 system = get_payroll_system()
 
