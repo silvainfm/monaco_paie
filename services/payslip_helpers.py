@@ -310,6 +310,22 @@ def safe_get_numeric(row: Dict, field: str, default: float = 0.0) -> float:
 # ============================================================================
 # AUDIT AND MODIFICATION TRACKING
 # ============================================================================
+#
+# TIME TRACKING USAGE:
+# To enable automatic time tracking in your Streamlit app:
+#
+# 1. Add to main payslip validation page (where accountants work):
+#    check_and_restart_time_tracking()
+#
+# 2. Add to logout/exit handlers:
+#    stop_time_tracking()
+#
+# 3. View reports in audit_log_page() under "Suivi du Temps" tab
+#
+# Time tracking auto-starts when company/period selected, auto-stops when
+# switching companies or exiting. Sessions < 5 seconds are ignored.
+#
+# ============================================================================
 
 def log_modification(matricule: str, field: str, old_value, new_value, user: str, reason: str):
     """Log paystub modification for audit trail"""
@@ -333,13 +349,92 @@ def log_modification(matricule: str, field: str, old_value, new_value, user: str
     with open(log_file, 'a', encoding='utf-8') as f:
         f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
 
+def log_time_entry(user: str, company: str, period: str, duration_seconds: float, session_start: str, session_end: str):
+    """Log time spent on company payslips"""
+
+    log_dir = Path("data/audit_logs")
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    log_entry = {
+        'timestamp': session_end,
+        'entry_type': 'time_tracking',
+        'user': user,
+        'company': company,
+        'period': period,
+        'session_start': session_start,
+        'session_end': session_end,
+        'duration_seconds': duration_seconds,
+        'duration_minutes': round(duration_seconds / 60, 2)
+    }
+
+    log_file = log_dir / f"modifications_{datetime.now().strftime('%Y%m')}.jsonl"
+    with open(log_file, 'a', encoding='utf-8') as f:
+        f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
+
+def start_time_tracking():
+    """Start tracking time for current company/period"""
+    if 'current_company' in st.session_state and 'current_period' in st.session_state:
+        company = st.session_state.current_company
+        period = st.session_state.current_period
+
+        # Stop previous tracking if exists
+        stop_time_tracking()
+
+        # Start new tracking
+        st.session_state.time_tracking_active = True
+        st.session_state.time_tracking_start = datetime.now()
+        st.session_state.time_tracking_company = company
+        st.session_state.time_tracking_period = period
+
+def stop_time_tracking():
+    """Stop tracking time and log entry"""
+    if st.session_state.get('time_tracking_active', False):
+        end_time = datetime.now()
+        start_time = st.session_state.time_tracking_start
+        duration = (end_time - start_time).total_seconds()
+
+        # Only log if session was > 5 seconds (avoid accidental clicks)
+        if duration > 5:
+            log_time_entry(
+                user=st.session_state.get('user', 'unknown'),
+                company=st.session_state.time_tracking_company,
+                period=st.session_state.time_tracking_period,
+                duration_seconds=duration,
+                session_start=start_time.isoformat(),
+                session_end=end_time.isoformat()
+            )
+
+        # Clear tracking state
+        st.session_state.time_tracking_active = False
+        st.session_state.time_tracking_start = None
+        st.session_state.time_tracking_company = None
+        st.session_state.time_tracking_period = None
+
+def check_and_restart_time_tracking():
+    """Check if company/period changed and restart tracking"""
+    current_company = st.session_state.get('current_company')
+    current_period = st.session_state.get('current_period')
+
+    if st.session_state.get('time_tracking_active', False):
+        tracking_company = st.session_state.get('time_tracking_company')
+        tracking_period = st.session_state.get('time_tracking_period')
+
+        # If company or period changed, stop old and start new
+        if tracking_company != current_company or tracking_period != current_period:
+            stop_time_tracking()
+            start_time_tracking()
+    else:
+        # Start tracking if not active
+        if current_company and current_period:
+            start_time_tracking()
+
 # ============================================================================
 # AUDIT LOG PAGE
 # ============================================================================
 
 def audit_log_page():
-    """View audit trail of modifications"""
-    st.header("📋 Journal des Modifications")
+    """View audit trail of modifications and time tracking"""
+    st.header("📋 Journal des Modifications et Temps")
 
     if st.session_state.role != 'admin':
         st.error("Accès réservé aux administrateurs")
@@ -370,31 +465,120 @@ def audit_log_page():
         pl.col('timestamp').str.strptime(pl.Datetime, format='%Y-%m-%dT%H:%M:%S.%f')
     ).sort('timestamp', descending=True)
 
-    # Filters
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        user_filter = st.selectbox("Utilisateur", ["Tous"] + logs_df['user'].unique().to_list())
-    with col2:
-        period_filter = st.selectbox("Période", ["Toutes"] + logs_df['period'].unique().to_list())
-    with col3:
-        matricule_filter = st.text_input("Matricule")
+    # Add entry_type column if missing (for backward compatibility)
+    if 'entry_type' not in logs_df.columns:
+        logs_df = logs_df.with_columns(
+            pl.lit('modification').alias('entry_type')
+        )
 
-    # Apply filters
-    filtered = logs_df
-    if user_filter != "Tous":
-        filtered = filtered.filter(pl.col('user') == user_filter)
-    if period_filter != "Toutes":
-        filtered = filtered.filter(pl.col('period') == period_filter)
-    if matricule_filter:
-        filtered = filtered.filter(pl.col('matricule').str.contains(f"(?i){matricule_filter}"))
+    # Separate time tracking and modification logs
+    time_logs = logs_df.filter(pl.col('entry_type') == 'time_tracking')
+    mod_logs = logs_df.filter(pl.col('entry_type') != 'time_tracking')
 
-    st.metric("Total modifications", len(filtered))
+    # Tab selection
+    tab1, tab2, tab3 = st.tabs(["Modifications", "Suivi du Temps", "Rapports Temps"])
 
-    # Display
-    st.dataframe(
-        filtered.select(['timestamp', 'user', 'matricule', 'field', 'old_value', 'new_value', 'reason']).to_pandas(),
-        use_container_width=True
-    )
+    with tab1:
+        st.subheader("Modifications")
+
+        if mod_logs.is_empty():
+            st.info("Aucune modification")
+        else:
+            # Filters
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                user_filter = st.selectbox("Utilisateur", ["Tous"] + mod_logs['user'].unique().to_list(), key="mod_user")
+            with col2:
+                period_filter = st.selectbox("Période", ["Toutes"] + mod_logs['period'].unique().to_list(), key="mod_period")
+            with col3:
+                matricule_filter = st.text_input("Matricule", key="mod_matricule")
+
+            # Apply filters
+            filtered = mod_logs
+            if user_filter != "Tous":
+                filtered = filtered.filter(pl.col('user') == user_filter)
+            if period_filter != "Toutes":
+                filtered = filtered.filter(pl.col('period') == period_filter)
+            if matricule_filter:
+                filtered = filtered.filter(pl.col('matricule').str.contains(f"(?i){matricule_filter}"))
+
+            st.metric("Total modifications", len(filtered))
+
+            # Display
+            st.dataframe(
+                filtered.select(['timestamp', 'user', 'matricule', 'field', 'old_value', 'new_value', 'reason']).to_pandas(),
+                use_container_width=True
+            )
+
+    with tab2:
+        st.subheader("Sessions de Travail")
+
+        if time_logs.is_empty():
+            st.info("Aucune session enregistrée")
+        else:
+            # Filters
+            col1, col2 = st.columns(2)
+            with col1:
+                time_user_filter = st.selectbox("Utilisateur", ["Tous"] + time_logs['user'].unique().to_list(), key="time_user")
+            with col2:
+                time_period_filter = st.selectbox("Période", ["Toutes"] + time_logs['period'].unique().to_list(), key="time_period")
+
+            # Apply filters
+            filtered_time = time_logs
+            if time_user_filter != "Tous":
+                filtered_time = filtered_time.filter(pl.col('user') == time_user_filter)
+            if time_period_filter != "Toutes":
+                filtered_time = filtered_time.filter(pl.col('period') == time_period_filter)
+
+            # Metrics
+            total_minutes = filtered_time['duration_minutes'].sum()
+            total_hours = round(total_minutes / 60, 2)
+
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Sessions", len(filtered_time))
+            col2.metric("Total heures", f"{total_hours}h")
+            col3.metric("Moy. par session", f"{round(total_minutes / max(len(filtered_time), 1), 1)} min")
+
+            # Display
+            st.dataframe(
+                filtered_time.select(['timestamp', 'user', 'company', 'period', 'duration_minutes', 'session_start', 'session_end']).to_pandas(),
+                use_container_width=True
+            )
+
+    with tab3:
+        st.subheader("Rapports de Temps")
+
+        if time_logs.is_empty():
+            st.info("Aucune donnée de temps")
+        else:
+            # Time per company/period
+            st.markdown("### Temps par Client/Période")
+            time_by_company = time_logs.group_by(['company', 'period']).agg([
+                pl.col('duration_minutes').sum().alias('total_minutes'),
+                pl.col('duration_minutes').count().alias('sessions')
+            ]).with_columns(
+                (pl.col('total_minutes') / 60).round(2).alias('total_hours')
+            ).sort('total_minutes', descending=True)
+
+            st.dataframe(
+                time_by_company.select(['company', 'period', 'total_hours', 'sessions']).to_pandas(),
+                use_container_width=True
+            )
+
+            # Time per accountant
+            st.markdown("### Temps par Comptable")
+            time_by_user = time_logs.group_by('user').agg([
+                pl.col('duration_minutes').sum().alias('total_minutes'),
+                pl.col('duration_minutes').count().alias('sessions'),
+                pl.col('company').n_unique().alias('clients')
+            ]).with_columns(
+                (pl.col('total_minutes') / 60).round(2).alias('total_hours')
+            ).sort('total_minutes', descending=True)
+
+            st.dataframe(
+                time_by_user.select(['user', 'total_hours', 'sessions', 'clients']).to_pandas(),
+                use_container_width=True
+            )
 
 # ============================================================================
 # UI HELPER FUNCTIONS
