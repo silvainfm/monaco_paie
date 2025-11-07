@@ -38,7 +38,6 @@ def get_salary_rubrics() -> List[Dict]:
         {'code': codes['tickets_resto'], 'label': 'Tickets restaurant', 'field': 'tickets_restaurant'},
     ]
 
-
 def get_all_available_salary_rubrics(year: int = None) -> List[Dict]:
     """Get all available salary rubrics including constants from MonacoPayrollConstants"""
     all_rubrics = []
@@ -81,7 +80,6 @@ def get_all_available_salary_rubrics(year: int = None) -> List[Dict]:
 
     return all_rubrics
 
-
 def get_available_rubrics_for_employee(employee_data: Dict, year: int = None) -> List[Dict]:
     """Get rubrics not currently displayed for this employee"""
     all_rubrics = get_all_available_salary_rubrics(year)
@@ -97,7 +95,6 @@ def get_available_rubrics_for_employee(employee_data: Dict, year: int = None) ->
     available = [r for r in all_rubrics if r['field'] not in displayed_fields]
 
     return available
-
 
 def get_charge_rubrics() -> Dict[str, List[Dict]]:
     """Get social charge rubrics from payroll_calculations"""
@@ -124,7 +121,6 @@ def get_charge_rubrics() -> Dict[str, List[Dict]]:
         'salariales': salariales,
         'patronales': patronales
     }
-
 
 def get_available_charges_for_employee(employee_data: Dict, year: int = None, month: int = None) -> List[Dict]:
     """Get charge codes not currently displayed for this employee"""
@@ -178,33 +174,6 @@ def get_available_charges_for_employee(employee_data: Dict, year: int = None, mo
     available = [charge for code, charge in all_charges.items() if code not in displayed_codes]
 
     return available
-
-
-# ============================================================================
-# AUDIT AND MODIFICATION TRACKING
-# ============================================================================
-
-def log_modification(matricule: str, field: str, old_value, new_value, user: str, reason: str):
-    """Log paystub modification for audit trail"""
-
-    log_dir = Path("data/audit_logs")
-    log_dir.mkdir(parents=True, exist_ok=True)
-
-    log_entry = {
-        'timestamp': datetime.now().isoformat(),
-        'user': user,
-        'matricule': matricule,
-        'field': field,
-        'old_value': str(old_value),
-        'new_value': str(new_value),
-        'reason': reason,
-        'period': st.session_state.current_period,
-        'company': st.session_state.current_company
-    }
-
-    log_file = log_dir / f"modifications_{datetime.now().strftime('%Y%m')}.jsonl"
-    with open(log_file, 'a', encoding='utf-8') as f:
-        f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
 
 # ============================================================================
 # PAYSLIP RECALCULATION
@@ -338,6 +307,31 @@ def safe_get_numeric(row: Dict, field: str, default: float = 0.0) -> float:
     except (TypeError, ValueError, AttributeError):
         return default
 
+# ============================================================================
+# AUDIT AND MODIFICATION TRACKING
+# ============================================================================
+
+def log_modification(matricule: str, field: str, old_value, new_value, user: str, reason: str):
+    """Log paystub modification for audit trail"""
+
+    log_dir = Path("data/audit_logs")
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    log_entry = {
+        'timestamp': datetime.now().isoformat(),
+        'user': user,
+        'matricule': matricule,
+        'field': field,
+        'old_value': str(old_value),
+        'new_value': str(new_value),
+        'reason': reason,
+        'period': st.session_state.current_period,
+        'company': st.session_state.current_company
+    }
+
+    log_file = log_dir / f"modifications_{datetime.now().strftime('%Y%m')}.jsonl"
+    with open(log_file, 'a', encoding='utf-8') as f:
+        f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
 
 # ============================================================================
 # AUDIT LOG PAGE
@@ -401,7 +395,6 @@ def audit_log_page():
         filtered.select(['timestamp', 'user', 'matricule', 'field', 'old_value', 'new_value', 'reason']).to_pandas(),
         use_container_width=True
     )
-
 
 # ============================================================================
 # UI HELPER FUNCTIONS
