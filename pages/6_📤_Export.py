@@ -23,6 +23,9 @@ from services.data_mgt import DataManager
 from services.payroll_system import IntegratedPayrollSystem
 from services.pdf_generation import PDFGeneratorService
 from services.email_archive import create_email_distribution_system
+from services.dsm_xml_generator import DSMXMLGenerator
+from services.payroll_calculations import MonacoPayrollConstants
+import json
 
 
 # Add parent to path
@@ -46,7 +49,7 @@ if df.is_empty():
     st.warning("Aucune donnée à exporter. Lancez d'abord le traitement des paies.")
     st.stop()
 
-tab1, tab2, tab3 = st.tabs(["Exporter par Excel", "Voir le Rapport", "Envoi Validation Client"])
+tab1, tab2, tab3, tab4 = st.tabs(["Exporter par Excel", "Voir le Rapport", "Envoi Validation Client", "DSM"])
 
 with tab1:
     st.info("📊 **Export Excel avec mise en forme**")
@@ -423,4 +426,180 @@ with tab3:
             import traceback
             with st.expander("Détails de l'erreur"):
                 st.code(traceback.format_exc())
+
+with tab4:
+    st.info("📋 **Déclaration DSM Monaco**")
+
+    # Load company info
+    system = IntegratedPayrollSystem()
+    company_info = system.company_info
+
+    # Check employer number
+    employer_number = company_info.get('employer_number_monaco', '')
+
+    if not employer_number:
+        st.warning("⚠️ Numéro d'employeur Monaco non configuré")
+        st.info("Veuillez configurer le numéro d'employeur dans Configuration → Entreprise")
+
+        if st.session_state.get('role') == "admin":
+            with st.expander("➕ Configurer maintenant"):
+                with st.form("quick_employer_config"):
+                    new_employer_number = st.text_input(
+                        "Numéro d'employeur Monaco",
+                        help="Numéro d'enregistrement Caisses Sociales Monaco (5 chiffres requis)"
+                    )
+
+                    if st.form_submit_button("💾 Sauvegarder"):
+                        if new_employer_number:
+                            if not new_employer_number.isdigit() or len(new_employer_number) != 5:
+                                st.error("Le numéro doit être exactement 5 chiffres")
+                            else:
+                                company_info['employer_number_monaco'] = new_employer_number
+                                config_file = Path("config/company_info.json")
+                                with open(config_file, 'w', encoding='utf-8') as f:
+                                    json.dump(company_info, f, indent=2)
+                                st.success("✅ Numéro d'employeur sauvegardé!")
+                                time.sleep(1)
+                                st.rerun()
+    else:
+        st.success(f"✅ Numéro employeur: {employer_number}")
+
+        # Configuration
+        st.markdown("---")
+        st.subheader("Configuration DSM")
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.metric("Numéro employeur", employer_number)
+
+        with col2:
+            st.metric("Période", st.session_state.current_period)
+
+        with col3:
+            constants = MonacoPayrollConstants(year)
+            plafond_t1 = constants.PLAFOND_SS_T1
+            st.metric("Plafond SS T1", f"{plafond_t1:,.2f} €")
+
+        # Default values configuration
+        st.markdown("---")
+        st.subheader("Configuration employés")
+
+        with st.expander("⚙️ Valeurs par défaut"):
+            col1, col2 = st.columns(2)
+
+            with col1:
+                default_affiliation_ac = st.selectbox("Affiliation AC", ["Oui", "Non"], index=0, key="dsm_ac")
+                default_affiliation_rc = st.selectbox("Affiliation RC", ["Oui", "Non"], index=0, key="dsm_rc")
+                default_affiliation_car = st.selectbox("Affiliation CAR", ["Oui", "Non"], index=0, key="dsm_car")
+
+            with col2:
+                default_teletravail = st.selectbox("Télétravail", ["Non", "Oui"], index=0, key="dsm_tt")
+                default_admin_salarie = st.selectbox("Admin salarié", ["Non", "Oui"], index=0, key="dsm_admin")
+
+            if st.button("📝 Appliquer aux employés", use_container_width=True, key="apply_dsm_defaults"):
+                df = df.with_columns([
+                    pl.when(pl.col('affiliation_ac').is_null())
+                    .then(pl.lit(default_affiliation_ac))
+                    .otherwise(pl.col('affiliation_ac'))
+                    .alias('affiliation_ac'),
+
+                    pl.when(pl.col('affiliation_rc').is_null())
+                    .then(pl.lit(default_affiliation_rc))
+                    .otherwise(pl.col('affiliation_rc'))
+                    .alias('affiliation_rc'),
+
+                    pl.when(pl.col('affiliation_car').is_null())
+                    .then(pl.lit(default_affiliation_car))
+                    .otherwise(pl.col('affiliation_car'))
+                    .alias('affiliation_car'),
+
+                    pl.when(pl.col('teletravail').is_null())
+                    .then(pl.lit(default_teletravail))
+                    .otherwise(pl.col('teletravail'))
+                    .alias('teletravail'),
+
+                    pl.when(pl.col('administrateur_salarie').is_null())
+                    .then(pl.lit(default_admin_salarie))
+                    .otherwise(pl.col('administrateur_salarie'))
+                    .alias('administrateur_salarie'),
+                ])
+
+                DataManager.save_period_data(df, st.session_state.current_company, month, year)
+                st.success("✅ Valeurs appliquées!")
+                st.rerun()
+
+        # Check missing fields
+        missing_fields_df = df.filter(
+            pl.col('date_naissance').is_null() |
+            pl.col('affiliation_ac').is_null() |
+            pl.col('affiliation_rc').is_null() |
+            pl.col('affiliation_car').is_null()
+        )
+
+        if missing_fields_df.height > 0:
+            st.warning(f"⚠️ {missing_fields_df.height} employé(s) avec champs manquants")
+            with st.expander("Voir"):
+                display_cols = ['matricule', 'nom', 'prenom']
+                if 'date_naissance' in missing_fields_df.columns:
+                    display_cols.append('date_naissance')
+                st.dataframe(missing_fields_df.select(display_cols).to_pandas(), use_container_width=True)
+
+        # Summary
+        st.markdown("---")
+        st.subheader("📊 Récapitulatif")
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.metric("Employés", len(df))
+
+        with col2:
+            total_brut = df.select(pl.col('salaire_brut').sum()).item()
+            st.metric("Masse brute", f"{total_brut:,.0f} €")
+
+        with col3:
+            st.metric("Base CCSS", f"{total_brut:,.0f} €")
+
+        with col4:
+            st.metric("Base CAR", f"{total_brut:,.0f} €")
+
+        st.markdown("---")
+
+        # Generation
+        col1, col2, col3 = st.columns([1, 1, 1])
+
+        with col2:
+            generate_button = st.button("📄 Générer DSM", type="primary", use_container_width=True)
+
+        if generate_button:
+            try:
+                with st.spinner("Génération XML DSM..."):
+                    generator = DSMXMLGenerator(employer_number, plafond_t1)
+                    xml_buffer = generator.generate_dsm_xml(df, st.session_state.current_period)
+
+                    xml_buffer.seek(0)
+                    xml_content = xml_buffer.read().decode('UTF-8')
+                    xml_buffer.seek(0)
+
+                    st.success("✅ DSM générée!")
+
+                    col1, col2, col3 = st.columns([1, 2, 1])
+                    with col2:
+                        st.download_button(
+                            label="📥 Télécharger DSM XML",
+                            data=xml_buffer.getvalue(),
+                            file_name=f"DSM_{employer_number}_{st.session_state.current_period}.xml",
+                            mime="application/xml",
+                            use_container_width=True
+                        )
+
+                    with st.expander("👁️ Aperçu XML"):
+                        st.code(xml_content, language="xml")
+
+            except Exception as e:
+                st.error(f"❌ Erreur: {str(e)}")
+                import traceback
+                with st.expander("Détails"):
+                    st.code(traceback.format_exc())
 
