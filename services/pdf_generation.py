@@ -1342,7 +1342,7 @@ class PTOProvisionPDFGenerator:
         return datetime(date.year, date.month, last_day)
 
 class PayJournalPDFGenerator:
-    """Générateur du journal de paie"""
+    """Générateur du OD de paie"""
 
     # Color scheme matching paystub
     COLORS = {
@@ -1420,7 +1420,7 @@ class PayJournalPDFGenerator:
             textColor=self.COLORS['primary_blue']
         )
 
-        title = Paragraph("Journal de Paie", title_style)
+        title = Paragraph("OD de Paie", title_style)
 
         # Subtitle with journal info
         subtitle_style = ParagraphStyle(
@@ -1437,7 +1437,7 @@ class PayJournalPDFGenerator:
         date_str = f"{last_day.day} {self._get_french_month(last_day.month)} {last_day.year}"
 
         subtitle = Paragraph(
-            f"Journal de Paie : {journal_num}     {company_name}     en date du : {date_str}",
+            f"OD de Paie : {journal_num}     {company_name}     en date du : {date_str}",
             subtitle_style
         )
 
