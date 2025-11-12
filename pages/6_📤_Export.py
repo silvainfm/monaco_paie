@@ -25,6 +25,7 @@ from services.pdf_generation import PDFGeneratorService
 from services.email_archive import create_email_distribution_system
 from services.dsm_xml_generator import DSMXMLGenerator
 from services.payroll_calculations import MonacoPayrollConstants
+from services.auth import AuthManager
 import json
 
 
@@ -43,7 +44,22 @@ if not require_company_and_period():
 
 month, year = map(int, st.session_state.current_period.split('-'))
 
+# Load company details
+company_details = DataManager.get_company_details(st.session_state.current_company)
+
 df = DataManager.load_period_data(st.session_state.current_company, month, year)
+
+# Display company info with planning_jour_paie
+if company_details:
+    col1, col2 = st.columns(2)
+    with col1:
+        if company_details.get('nom_societe'):
+            st.markdown(f"**Société:** {company_details['nom_societe']}")
+    with col2:
+        if company_details.get('planning_jour_paie'):
+            jour = company_details['planning_jour_paie']
+            st.markdown(f"**Jour de paie:** Le {jour} du mois")
+    st.markdown("---")
 
 if df.is_empty():
     st.warning("Aucune donnée à exporter. Lancez d'abord le traitement des paies.")
@@ -184,6 +200,7 @@ with tab1:
 
 with tab2:
     st.info("📋 **Rapport de synthèse**")
+
     if st.button("Voir rapport", use_container_width=True):
         st.markdown("---")
         st.subheader("Rapport de synthèse")
@@ -294,13 +311,42 @@ with tab3:
     with st.form("validation_email_form"):
         st.subheader("Destinataire")
 
+        # Get company contact info from database
+        default_contact = company_details.get('point_contact', '') if company_details else ''
+        default_email = company_details.get('email', '') if company_details else ''
+
+        # Check if user is admin
+        current_user = st.session_state.get('user', '')
+        is_admin = AuthManager.is_admin(current_user)
+
         col1, col2 = st.columns([2, 1])
 
         with col1:
-            client_email = st.text_input(
-                "Email du client (employeur)",
-                help="L'email de l'entreprise cliente qui recevra tous les documents pour validation"
-            )
+            if is_admin:
+                # Admin can edit
+                st.markdown("**Contact et Email (éditable - admin)**")
+                client_contact = st.text_input(
+                    "Nom du contact",
+                    value=default_contact,
+                    help="Nom du contact client"
+                )
+                client_email = st.text_input(
+                    "Email du client (employeur)",
+                    value=default_email,
+                    help="L'email de l'entreprise cliente qui recevra tous les documents pour validation"
+                )
+            else:
+                # Read-only for non-admin
+                st.markdown("**Informations de contact**")
+                if default_contact:
+                    st.info(f"**Contact:** {default_contact}")
+                if default_email:
+                    st.info(f"**Email:** {default_email}")
+                else:
+                    st.warning("⚠️ Email non configuré - contactez l'administrateur")
+
+                # Use default email for sending
+                client_email = default_email
 
         with col2:
             test_mode = st.checkbox("Mode test", value=True, help="Ne pas envoyer réellement l'email")

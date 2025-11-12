@@ -210,12 +210,17 @@ class DataManager:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS companies (
                     id VARCHAR PRIMARY KEY,
-                    name VARCHAR,
+                    nom_societe VARCHAR,
                     siret VARCHAR,
-                    address VARCHAR,
-                    phone VARCHAR,
+                    code_naf VARCHAR,
+                    numero_employeur VARCHAR,
+                    adresse VARCHAR,
+                    telephone VARCHAR,
+                    point_contact VARCHAR,
                     email VARCHAR,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    mode_envoie_bulletin VARCHAR,
+                    cree_le TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    planning_jour_paie INTEGER
                 )
             """)
 
@@ -479,7 +484,43 @@ class DataManager:
                 return ()
         finally:
             DataManager.close_connection(conn)
-    
+
+    @staticmethod
+    def get_company_details(company_id: str) -> Optional[Dict]:
+        """Get company details from database"""
+        conn = DataManager.get_connection()
+
+        try:
+            result = conn.execute("""
+                SELECT id, nom_societe, siret, code_naf, numero_employeur,
+                       adresse, telephone, point_contact, email,
+                       mode_envoie_bulletin, planning_jour_paie
+                FROM companies
+                WHERE id = ?
+            """, [company_id]).fetchone()
+
+            if result:
+                return {
+                    'id': result[0],
+                    'nom_societe': result[1],
+                    'siret': result[2],
+                    'code_naf': result[3],
+                    'numero_employeur': result[4],
+                    'adresse': result[5],
+                    'telephone': result[6],
+                    'point_contact': result[7],
+                    'email': result[8],
+                    'mode_envoie_bulletin': result[9],
+                    'planning_jour_paie': result[10]
+                }
+
+            return None
+        except Exception as e:
+            logger.warning(f"Error loading company details: {e}")
+            return None
+        finally:
+            DataManager.close_connection(conn)
+
     @staticmethod
     def get_company_creation_date(company_id: str) -> Optional[datetime]:
         """Get the creation date of a company"""

@@ -340,6 +340,19 @@ for row_idx, row in enumerate(filtered_df.iter_rows(named=True)):
                 st.markdown("##### Cotisations sociales")
                 st.info("ℹ️ Modification manuelle des charges. La base est commune pour les parts salariale et patronale.")
 
+                # Assedic toggle
+                assedic_toggle_key = f"assedic_toggle_{unique_key}"
+                if assedic_toggle_key not in st.session_state:
+                    st.session_state[assedic_toggle_key] = False
+
+                has_assedic = st.toggle(
+                    "Assurance Chômage (Assedic)",
+                    value=st.session_state[assedic_toggle_key],
+                    key=f"assedic_input_{unique_key}",
+                    help="Activer pour inclure les charges d'assurance chômage"
+                )
+                st.session_state[assedic_toggle_key] = has_assedic
+
                 # Get charge definitions
                 from services.payroll_calculations import ChargesSocialesMonaco
                 from services.pdf_generation import PaystubPDFGenerator
@@ -377,8 +390,12 @@ for row_idx, row in enumerate(filtered_df.iter_rows(named=True)):
                         'taux_pat': 0,
                         'has_salarial': True,
                         'has_patronal': False
-                    },
-                    {
+                    }
+                ]
+
+                # Add ASSEDIC_T1 if toggle is enabled
+                if has_assedic:
+                    charges_config.append({
                         'code': 'ASSEDIC_T1',
                         'name': 'Assurance Chômage T1',
                         'base_default': plafond_t1,
@@ -386,13 +403,15 @@ for row_idx, row in enumerate(filtered_df.iter_rows(named=True)):
                         'taux_pat': 4.05,
                         'has_salarial': True,
                         'has_patronal': True
-                    }
-                ]
+                    })
 
                 # Add T2 charges if applicable
                 if base_t2 > 0:
-                    charges_config.extend([
-                        {
+                    t2_charges = []
+
+                    # Add ASSEDIC_T2 only if toggle is enabled
+                    if has_assedic:
+                        t2_charges.append({
                             'code': 'ASSEDIC_T2',
                             'name': 'Assurance Chômage T2',
                             'base_default': base_t2,
@@ -400,7 +419,9 @@ for row_idx, row in enumerate(filtered_df.iter_rows(named=True)):
                             'taux_pat': 4.05,
                             'has_salarial': True,
                             'has_patronal': True
-                        },
+                        })
+
+                    t2_charges.extend([
                         {
                             'code': 'CONTRIB_EQUILIBRE_GEN_T2',
                             'name': 'Contrib. équilibre général T2',
@@ -420,6 +441,8 @@ for row_idx, row in enumerate(filtered_df.iter_rows(named=True)):
                             'has_patronal': True
                         }
                     ])
+
+                    charges_config.extend(t2_charges)
 
                 # Add other charges
                 charges_config.extend([
