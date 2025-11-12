@@ -388,21 +388,47 @@ with tab3:
 
         st.markdown("---")
 
+        # Password protection option
+        st.subheader("🔒 Protection des PDFs")
+        use_password = st.toggle(
+            "Protéger les PDFs par mot de passe",
+            value=False,
+            help="Ajouter un mot de passe pour ouvrir tous les documents PDF générés"
+        )
+
+        pdf_password = None
+        if use_password:
+            pdf_password = st.text_input(
+                "Mot de passe pour les PDFs",
+                type="password",
+                help="Ce mot de passe sera requis pour ouvrir tous les documents PDF (bulletins, journal, provision CP)"
+            )
+            if pdf_password:
+                st.info(f"✅ Les PDFs seront protégés par mot de passe")
+
+        st.markdown("---")
+
         submit_button = st.form_submit_button("📧 Envoyer l'email de validation", use_container_width=True, type="primary")
 
     if submit_button:
         if not client_email:
             st.error("❌ Veuillez saisir l'adresse email du client")
+        elif use_password and not pdf_password:
+            st.error("❌ Veuillez saisir un mot de passe pour protéger les PDFs")
+        else:
+            try:
+                with st.spinner("Génération des documents PDF..."):
+                    # Charger les informations de l'entreprise
+                    system = IntegratedPayrollSystem()
+                    company_info = system.company_info
 
-        try:
-            with st.spinner("Génération des documents PDF..."):
-                # Charger les informations de l'entreprise
-                system = IntegratedPayrollSystem()
-                company_info = system.company_info
-
-                # Générer les documents PDF
-                pdf_service = PDFGeneratorService(company_info)
-                documents = pdf_service.generate_monthly_documents(df_period, period)
+                    # Générer les documents PDF
+                    pdf_service = PDFGeneratorService(company_info)
+                    documents = pdf_service.generate_monthly_documents(
+                        df_period,
+                        period,
+                        password=pdf_password if use_password else None
+                    )
 
                 # Préparer le résumé pour l'email
                 payroll_summary = {
@@ -467,11 +493,11 @@ with tab3:
                 else:
                     st.error(f"❌ Échec de l'envoi: {result.get('error', 'Erreur inconnue')}")
 
-        except Exception as e:
-            st.error(f"❌ Erreur: {str(e)}")
-            import traceback
-            with st.expander("Détails de l'erreur"):
-                st.code(traceback.format_exc())
+            except Exception as e:
+                st.error(f"❌ Erreur: {str(e)}")
+                import traceback
+                with st.expander("Détails de l'erreur"):
+                    st.code(traceback.format_exc())
 
 with tab4:
     st.info("📋 **Déclaration DSM Monaco**")

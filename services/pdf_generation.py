@@ -226,27 +226,33 @@ class PaystubPDFGenerator:
         except (TypeError, ValueError):
             return default
     
-    def generate_paystub(self, employee_data: Dict, output_path: Optional[str] = None) -> io.BytesIO:
+    def generate_paystub(self, employee_data: Dict, output_path: Optional[str] = None,
+                        password: Optional[str] = None) -> io.BytesIO:
         """Generate a compact single-page paystub"""
-        
+
         # Ensure required data fields
         self._prepare_employee_data(employee_data)
-        
+
         # Create buffer or file
         if output_path:
             pdf_buffer = output_path
         else:
             pdf_buffer = io.BytesIO()
-        
+
         # Create document with smaller margins for compact layout
-        doc = SimpleDocTemplate(
-            pdf_buffer,
-            pagesize=A4,
-            rightMargin=0.8*cm,
-            leftMargin=0.8*cm,
-            topMargin=1*cm,
-            bottomMargin=0.8*cm
-        )
+        doc_kwargs = {
+            'pagesize': A4,
+            'rightMargin': 0.8*cm,
+            'leftMargin': 0.8*cm,
+            'topMargin': 1*cm,
+            'bottomMargin': 0.8*cm
+        }
+
+        # Add password protection if specified
+        if password:
+            doc_kwargs['encrypt'] = password
+
+        doc = SimpleDocTemplate(pdf_buffer, **doc_kwargs)
         
         # Build the content
         story = []
@@ -1029,7 +1035,8 @@ class PTOProvisionPDFGenerator:
         self.styles = PDFStyles.get_styles()
     
     def generate_pto_provision(self, provisions_data: List[Dict],
-                              period: str, output_path: Optional[str] = None) -> io.BytesIO:
+                              period: str, output_path: Optional[str] = None,
+                              password: Optional[str] = None) -> io.BytesIO:
         """
         Générer le document de provision pour congés payés format
 
@@ -1037,6 +1044,7 @@ class PTOProvisionPDFGenerator:
             provisions_data: Liste des provisions par employé
             period: Période (format: "MM-YYYY")
             output_path: Chemin de sortie (optionnel)
+            password: Mot de passe pour protéger le PDF (optionnel)
         """
         if output_path:
             pdf_buffer = output_path
@@ -1044,14 +1052,19 @@ class PTOProvisionPDFGenerator:
             pdf_buffer = io.BytesIO()
 
         # Use landscape A4
-        doc = SimpleDocTemplate(
-            pdf_buffer,
-            pagesize=landscape(A4),
-            rightMargin=1*cm,
-            leftMargin=1*cm,
-            topMargin=1.5*cm,
-            bottomMargin=2*cm
-        )
+        doc_kwargs = {
+            'pagesize': landscape(A4),
+            'rightMargin': 1*cm,
+            'leftMargin': 1*cm,
+            'topMargin': 1.5*cm,
+            'bottomMargin': 2*cm
+        }
+
+        # Add password protection if specified
+        if password:
+            doc_kwargs['encrypt'] = password
+
+        doc = SimpleDocTemplate(pdf_buffer, **doc_kwargs)
 
         story = []
 
@@ -1361,7 +1374,8 @@ class PayJournalPDFGenerator:
         self.styles = PDFStyles.get_styles()
 
     def generate_pay_journal(self, employees_data: List[Dict],
-                            period: str, output_path: Optional[str] = None) -> io.BytesIO:
+                            period: str, output_path: Optional[str] = None,
+                            password: Optional[str] = None) -> io.BytesIO:
         """
         Générer le journal de paie consolidé
 
@@ -1369,6 +1383,7 @@ class PayJournalPDFGenerator:
             employees_data: Liste des données de tous les employés
             period: Période (format: "MM-YYYY")
             output_path: Chemin de sortie (optionnel)
+            password: Mot de passe pour protéger le PDF (optionnel)
         """
         if output_path:
             pdf_buffer = output_path
@@ -1376,14 +1391,19 @@ class PayJournalPDFGenerator:
             pdf_buffer = io.BytesIO()
 
         # Use landscape A4
-        doc = SimpleDocTemplate(
-            pdf_buffer,
-            pagesize=landscape(A4),
-            rightMargin=1*cm,
-            leftMargin=1*cm,
-            topMargin=2*cm,
-            bottomMargin=2*cm
-        )
+        doc_kwargs = {
+            'pagesize': landscape(A4),
+            'rightMargin': 1*cm,
+            'leftMargin': 1*cm,
+            'topMargin': 2*cm,
+            'bottomMargin': 2*cm
+        }
+
+        # Add password protection if specified
+        if password:
+            doc_kwargs['encrypt'] = password
+
+        doc = SimpleDocTemplate(pdf_buffer, **doc_kwargs)
 
         story = []
 
@@ -2828,16 +2848,18 @@ class PDFGeneratorService:
         self.charges_sociales_generator = ChargesSocialesPDFGenerator(company_info, logo_path)
         self.recap_generator = RecapPaiePDFGenerator(company_info, logo_path)
     
-    def generate_monthly_documents(self, employees_df: pl.DataFrame, 
-                                  period: str, output_dir: Optional[Path] = None) -> Dict[str, any]:
+    def generate_monthly_documents(self, employees_df: pl.DataFrame,
+                                  period: str, output_dir: Optional[Path] = None,
+                                  password: Optional[str] = None) -> Dict[str, any]:
         """
         Générer tous les documents pour une période mensuelle
-        
+
         Args:
             employees_df: DataFrame avec les données de tous les employés
             period: Période au format "MM-YYYY"
             output_dir: Répertoire de sortie (optionnel)
-        
+            password: Mot de passe pour protéger les PDFs (optionnel)
+
         Returns:
             Dictionnaire avec les buffers PDF générés
         """
@@ -2875,9 +2897,9 @@ class PDFGeneratorService:
             # Générer le bulletin
             if output_dir:
                 output_path = output_dir / f"bulletin_{emp_data['matricule']}_{period}.pdf"
-                self.paystub_generator.generate_paystub(emp_data, str(output_path))
+                self.paystub_generator.generate_paystub(emp_data, str(output_path), password=password)
             else:
-                paystub_buffer = self.paystub_generator.generate_paystub(emp_data)
+                paystub_buffer = self.paystub_generator.generate_paystub(emp_data, password=password)
                 paystubs.append({
                     'matricule': emp_data['matricule'],
                     'nom': emp_data['nom'],
@@ -2890,19 +2912,19 @@ class PDFGeneratorService:
         # 2. Générer le journal de paie
         if output_dir:
             journal_path = output_dir / f"journal_paie_{period}.pdf"
-            self.journal_generator.generate_pay_journal(employees_data, period, str(journal_path))
+            self.journal_generator.generate_pay_journal(employees_data, period, str(journal_path), password=password)
         else:
-            journal_buffer = self.journal_generator.generate_pay_journal(employees_data, period)
+            journal_buffer = self.journal_generator.generate_pay_journal(employees_data, period, password=password)
             documents['journal'] = journal_buffer
-        
+
         # 3. Générer la provision pour congés payés
         provisions_data = self._prepare_provisions_data(employees_df, period_date)
-        
+
         if output_dir:
             pto_path = output_dir / f"provision_cp_{period}.pdf"
-            self.pto_generator.generate_pto_provision(provisions_data, period, str(pto_path))
+            self.pto_generator.generate_pto_provision(provisions_data, period, str(pto_path), password=password)
         else:
-            pto_buffer = self.pto_generator.generate_pto_provision(provisions_data, period)
+            pto_buffer = self.pto_generator.generate_pto_provision(provisions_data, period, password=password)
             documents['pto_provision'] = pto_buffer
         
         return documents
