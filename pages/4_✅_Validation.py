@@ -13,6 +13,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from services.shared_utils import require_company_and_period, render_sidebar
 from services.auth import AuthManager
 from services.data_mgt import DataManager
+from services.payroll_calculations import ChargesSocialesMonaco
+from services.pdf_generation import PaystubPDFGenerator
 from services.payslip_helpers import (
     get_salary_rubrics,
     get_available_rubrics_for_employee,
@@ -391,10 +393,6 @@ for row_idx, row in enumerate(filtered_df.iter_rows(named=True)):
                 )
                 st.session_state[assedic_toggle_key] = has_assedic
 
-                # Get charge definitions
-                from services.payroll_calculations import ChargesSocialesMonaco
-                from services.pdf_generation import PaystubPDFGenerator
-
                 details_charges = row.get('details_charges', {})
                 charges_sal = details_charges.get('charges_salariales', {})
                 charges_pat = details_charges.get('charges_patronales', {})
@@ -408,6 +406,31 @@ for row_idx, row in enumerate(filtered_df.iter_rows(named=True)):
                 bases_key = f"charge_bases_{unique_key}"
                 if bases_key not in st.session_state:
                     st.session_state[bases_key] = {}
+
+                # Auto-populate bases with salaire_brut if not already set
+                # This ensures all charges start with the correct base value
+                default_bases = {
+                    'CAR': salaire_brut,
+                    'CCSS': salaire_brut,
+                    'ASSEDIC_T1': plafond_t1,
+                    'CONTRIB_EQUILIBRE_TECH': salaire_brut,
+                    'CONTRIB_EQUILIBRE_GEN_T1': plafond_t1,
+                    'RETRAITE_COMP_T1': plafond_t1,
+                    'CMRC': salaire_brut
+                }
+
+                # Add T2 bases if applicable
+                if base_t2 > 0:
+                    default_bases.update({
+                        'ASSEDIC_T2': base_t2,
+                        'CONTRIB_EQUILIBRE_GEN_T2': base_t2,
+                        'RETRAITE_COMP_T2': base_t2
+                    })
+
+                # Initialize with defaults if not already set
+                for code, default_base in default_bases.items():
+                    if code not in st.session_state[bases_key]:
+                        st.session_state[bases_key][code] = default_base
 
                 # Define charges to display in combined format
                 charges_config = [
