@@ -211,7 +211,17 @@ class ChargesSocialesMonaco:
                         is_valid = raw_val is not None and not (isinstance(raw_val, float) and math.isnan(raw_val))
                         taux = float(raw_val) if is_valid and str(raw_val) != "" else default_salarial.get(code, {}).get("taux", 0)
 
-                    plafond_val = None if row.get("plafond") == "None" else row.get("plafond")
+                    plafond_val = row.get("plafond")
+                    # Convert plafond to numeric if possible, otherwise keep as string
+                    if plafond_val and plafond_val != "None" and str(plafond_val).strip():
+                        try:
+                            plafond_val = float(plafond_val)
+                        except (ValueError, TypeError):
+                            # Keep as string for T1/T2 type plafonds
+                            pass
+                    else:
+                        plafond_val = None
+
                     self.COTISATIONS_SALARIALES[code] = {
                         "taux": taux,
                         "plafond": plafond_val,
@@ -239,7 +249,17 @@ class ChargesSocialesMonaco:
                         is_valid = raw_val is not None and not (isinstance(raw_val, float) and math.isnan(raw_val))
                         taux = float(raw_val) if is_valid and str(raw_val) != "" else default_patronal.get(code, {}).get("taux", 0)
 
-                    plafond_val = None if row.get("plafond") == "None" else row.get("plafond")
+                    plafond_val = row.get("plafond")
+                    # Convert plafond to numeric if possible, otherwise keep as string
+                    if plafond_val and plafond_val != "None" and str(plafond_val).strip():
+                        try:
+                            plafond_val = float(plafond_val)
+                        except (ValueError, TypeError):
+                            # Keep as string for T1/T2 type plafonds
+                            pass
+                    else:
+                        plafond_val = None
+
                     self.COTISATIONS_PATRONALES[code] = {
                         "taux": taux,
                         "plafond": plafond_val,
@@ -272,50 +292,93 @@ class ChargesSocialesMonaco:
         
         return tranches
     
-    def calculate_cotisations(self, salaire_brut: float, 
-                            type_cotisation: str = 'salariales') -> Dict[str, float]:
+    def calculate_cotisations(self, salaire_brut: float,
+                            type_cotisation: str = 'salariales',
+                            cumul_brut_annuel: float = 0.0) -> Dict[str, float]:
         """
-        Calculer les cotisations sociales
-        
+        Calculer les cotisations sociales with plafond-based tranches
+
         Args:
             salaire_brut: Salaire brut mensuel
             type_cotisation: 'salariales' ou 'patronales'
-        
+            cumul_brut_annuel: Cumul annuel brut before this period (for plafond calculations)
+
         Returns:
             Dictionnaire des cotisations par type
         """
         tranches = self.calculate_base_tranches(salaire_brut, self.year)
-        
+
         cotisations = self.COTISATIONS_SALARIALES if type_cotisation.upper() == 'SALARIALES' else self.COTISATIONS_PATRONALES
-        
+
         results = {}
-        
+
         for key, params in cotisations.items():
             base = salaire_brut  # Par défaut, base = salaire total
-            
+
+            # Handle T1/T2 tranches (per-period tranches)
             if params['plafond'] == 'T1':
                 base = tranches['T1']
             elif params['plafond'] == 'T2':
                 base = tranches['T1'] + tranches['T2']
-            
+            # Handle numeric plafonds (annual cumulative tranches)
+            elif params['plafond'] and isinstance(params['plafond'], (int, float)):
+                plafond = float(params['plafond'])
+                base = self._calculate_base_with_annual_plafond(
+                    salaire_brut,
+                    cumul_brut_annuel,
+                    plafond
+                )
+
             montant = round(base * params['taux'] / 100, 2)
             results[key] = montant
-        
+
         return results
+
+    def _calculate_base_with_annual_plafond(self, salaire_brut: float,
+                                           cumul_brut_annuel: float,
+                                           plafond: float) -> float:
+        """
+        Calculate the base amount for a charge with an annual plafond
+
+        Args:
+            salaire_brut: Current period's gross salary
+            cumul_brut_annuel: Cumulative gross salary before this period
+            plafond: Annual plafond for this tranche
+
+        Returns:
+            Amount of current salary subject to this charge
+        """
+        # Calculate new cumulative after this period
+        new_cumul = cumul_brut_annuel + salaire_brut
+
+        # If we haven't reached the plafond yet
+        if cumul_brut_annuel >= plafond:
+            # Already exceeded plafond, no charge applies
+            return 0.0
+        elif new_cumul <= plafond:
+            # Entirely within plafond
+            return salaire_brut
+        else:
+            # Partially exceeds plafond - only charge the portion within plafond
+            return plafond - cumul_brut_annuel
     
-    def calculate_total_charges(self, salaire_brut: float) -> Tuple[float, float, Dict]:
+    def calculate_total_charges(self, salaire_brut: float, cumul_brut_annuel: float = 0.0) -> Tuple[float, float, Dict]:
         """
         Calculer le total des charges salariales et patronales
-        
+
+        Args:
+            salaire_brut: Salaire brut mensuel
+            cumul_brut_annuel: Cumul annuel brut before this period
+
         Returns:
             Tuple (total_salarial, total_patronal, details)
         """
-        charges_salariales = self.calculate_cotisations(salaire_brut, 'salariales')
-        charges_patronales = self.calculate_cotisations(salaire_brut, 'patronales')
-        
+        charges_salariales = self.calculate_cotisations(salaire_brut, 'salariales', cumul_brut_annuel)
+        charges_patronales = self.calculate_cotisations(salaire_brut, 'patronales', cumul_brut_annuel)
+
         total_salarial = sum(charges_salariales.values())
         total_patronal = sum(charges_patronales.values())
-        
+
         details = {
             'charges_salariales': charges_salariales,
             'charges_patronales': charges_patronales,
@@ -324,7 +387,7 @@ class ChargesSocialesMonaco:
             'cout_total': salaire_brut + total_patronal,
             'year': self.year
         }
-        
+
         return total_salarial, total_patronal, details
 
 class CalculateurPaieMonaco:
@@ -445,15 +508,17 @@ class CalculateurPaieMonaco:
         provision = salaire_journalier * jours_acquis * 1.1  # +10% pour charges
         return round(provision, 2)
     
-    def process_employee_payslip(self, employee_data: Dict, 
-                                processing_date: date = None) -> Dict:
+    def process_employee_payslip(self, employee_data: Dict,
+                                processing_date: date = None,
+                                cumul_brut_annuel: float = 0.0) -> Dict:
         """
         Traiter une fiche de paie complète pour un employé
-        
+
         Args:
             employee_data: Dictionnaire contenant toutes les données de l'employé
             processing_date: Date de traitement (pour déterminer l'année des taux)
-        
+            cumul_brut_annuel: Cumul annuel brut before this period (for plafond calculations)
+
         Returns:
             Dictionnaire avec tous les calculs de paie
         """
@@ -540,7 +605,9 @@ class CalculateurPaieMonaco:
             prime_non_cotisable += bonus_low_wage
 
         # Calcul des charges sociales
-        charges_sal, charges_pat, charges_details = self.charges_calculator.calculate_total_charges(salaire_brut)
+        charges_sal, charges_pat, charges_details = self.charges_calculator.calculate_total_charges(
+            salaire_brut, cumul_brut_annuel
+        )
         
         # Ajout de la retenue tickets restaurant
         charges_sal += tickets_details.get('part_salariale', 0)

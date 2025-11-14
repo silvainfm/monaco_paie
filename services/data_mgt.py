@@ -647,6 +647,20 @@ class DataAuditLogger:
                 CREATE INDEX IF NOT EXISTS idx_audit_company
                 ON audit_log(company_id, period_year, period_month)
             """)
+
+            # Create permanent rubrics table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS employee_permanent_rubrics (
+                    company_id VARCHAR,
+                    matricule VARCHAR,
+                    rubric_code VARCHAR,
+                    rubric_field VARCHAR,
+                    rubric_label VARCHAR,
+                    added_by VARCHAR,
+                    added_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (company_id, matricule, rubric_code)
+                )
+            """)
         finally:
             DataManager.close_connection(conn)
     
@@ -723,6 +737,114 @@ class DataAuditLogger:
             except Exception as e:
                 logger.warning(f"Error loading user activity: {e}")
                 return pl.DataFrame()
+        finally:
+            DataManager.close_connection(conn)
+
+    @staticmethod
+    def is_first_bulletin(company_id: str, matricule: str, current_year: int, current_month: int) -> bool:
+        """Check if this is the first bulletin for an employee"""
+        conn = DataManager.get_connection()
+
+        try:
+            result = conn.execute("""
+                SELECT COUNT(*) FROM payroll_data
+                WHERE company_id = ? AND matricule = ?
+                AND (period_year < ? OR (period_year = ? AND period_month < ?))
+            """, [company_id, matricule, current_year, current_year, current_month]).fetchone()
+
+            return result[0] == 0 if result else True
+        except Exception as e:
+            logger.warning(f"Error checking first bulletin: {e}")
+            return False
+        finally:
+            DataManager.close_connection(conn)
+
+    @staticmethod
+    def save_permanent_rubric(company_id: str, matricule: str, rubric_code: str,
+                              rubric_field: str, rubric_label: str, user: str):
+        """Save a permanent rubric for an employee"""
+        conn = DataManager.get_connection()
+
+        try:
+            conn.execute("""
+                INSERT OR REPLACE INTO employee_permanent_rubrics
+                (company_id, matricule, rubric_code, rubric_field, rubric_label, added_by)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, [company_id, matricule, rubric_code, rubric_field, rubric_label, user])
+        except Exception as e:
+            logger.error(f"Error saving permanent rubric: {e}")
+        finally:
+            DataManager.close_connection(conn)
+
+    @staticmethod
+    def get_permanent_rubrics(company_id: str, matricule: str) -> List[Dict]:
+        """Get all permanent rubrics for an employee"""
+        conn = DataManager.get_connection()
+
+        try:
+            result = conn.execute("""
+                SELECT rubric_code, rubric_field, rubric_label
+                FROM employee_permanent_rubrics
+                WHERE company_id = ? AND matricule = ?
+            """, [company_id, matricule]).fetchall()
+
+            return [
+                {
+                    'code': row[0],
+                    'field': row[1],
+                    'label': row[2]
+                }
+                for row in result
+            ] if result else []
+        except Exception as e:
+            logger.warning(f"Error loading permanent rubrics: {e}")
+            return []
+        finally:
+            DataManager.close_connection(conn)
+
+    @staticmethod
+    def delete_permanent_rubric(company_id: str, matricule: str, rubric_code: str):
+        """Delete a permanent rubric for an employee"""
+        conn = DataManager.get_connection()
+
+        try:
+            conn.execute("""
+                DELETE FROM employee_permanent_rubrics
+                WHERE company_id = ? AND matricule = ? AND rubric_code = ?
+            """, [company_id, matricule, rubric_code])
+        except Exception as e:
+            logger.error(f"Error deleting permanent rubric: {e}")
+        finally:
+            DataManager.close_connection(conn)
+
+    @staticmethod
+    def get_cumul_brut_annuel(company_id: str, matricule: str, current_year: int, current_month: int) -> float:
+        """
+        Get cumulative gross salary for an employee for the year before the current period
+
+        Args:
+            company_id: Company identifier
+            matricule: Employee identifier
+            current_year: Current period year
+            current_month: Current period month
+
+        Returns:
+            Cumulative gross salary before current period
+        """
+        conn = DataManager.get_connection()
+
+        try:
+            result = conn.execute("""
+                SELECT COALESCE(SUM(salaire_brut), 0) as cumul
+                FROM payroll_data
+                WHERE company_id = ? AND matricule = ? AND period_year = ?
+                AND period_month < ?
+            """, [company_id, matricule, current_year, current_month]).fetchone()
+
+            return float(result[0]) if result else 0.0
+        except Exception as e:
+            logger.warning(f"Error getting cumul brut annuel: {e}")
+            return 0.0
         finally:
             DataManager.close_connection(conn)
 

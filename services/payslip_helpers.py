@@ -179,7 +179,8 @@ def get_available_charges_for_employee(employee_data: Dict, year: int = None, mo
 # PAYSLIP RECALCULATION
 # ============================================================================
 
-def recalculate_employee_payslip(employee_data: Dict, modifications: Dict) -> Dict:
+def recalculate_employee_payslip(employee_data: Dict, modifications: Dict,
+                                 company_id: str = None, year: int = None, month: int = None) -> Dict:
     """Recalculate payslip after modifications"""
 
     # Deep copy and clean all numeric fields first
@@ -230,9 +231,18 @@ def recalculate_employee_payslip(employee_data: Dict, modifications: Dict) -> Di
     # Apply remaining modifications (these are already numeric from the form inputs)
     updated_data.update(modifications)
 
+    # Get cumulative annual gross salary for plafond calculations
+    cumul_brut_annuel = 0.0
+    if company_id and year and month:
+        matricule = updated_data.get('matricule', '')
+        if matricule:
+            cumul_brut_annuel = DataManager.get_cumul_brut_annuel(
+                company_id, matricule, year, month
+            )
+
     # Recalculate
     calculator = CalculateurPaieMonaco()
-    return calculator.process_employee_payslip(updated_data)
+    return calculator.process_employee_payslip(updated_data, cumul_brut_annuel=cumul_brut_annuel)
 
 # ============================================================================
 # DATA CLEANING AND VALIDATION

@@ -218,6 +218,19 @@ for row_idx, row in enumerate(filtered_df.iter_rows(named=True)):
             with tab1:
                 st.markdown("##### Éléments de rémunération")
 
+                # Check if this is the first bulletin for this employee
+                month, year = map(int, st.session_state.current_period.split('-'))
+                is_first_bulletin = DataManager.is_first_bulletin(
+                    st.session_state.current_company,
+                    matricule,
+                    year,
+                    month
+                )
+
+                # Show info if first bulletin
+                if is_first_bulletin:
+                    st.info("ℹ️ **Premier bulletin** - Les rubriques ajoutées peuvent être marquées comme permanentes pour apparaître automatiquement sur les futurs bulletins")
+
                 salary_rubrics = get_salary_rubrics()
 
                 # Create editable table
@@ -262,7 +275,7 @@ for row_idx, row in enumerate(filtered_df.iter_rows(named=True)):
                     st.session_state[additional_rubrics_key] = []
 
                 # Display additional rubrics that were added
-                for added_rubric in st.session_state[additional_rubrics_key]:
+                for idx, added_rubric in enumerate(st.session_state[additional_rubrics_key]):
                     field = added_rubric['field']
                     current_value = safe_get_numeric(row, field, 0.0)
 
@@ -296,6 +309,31 @@ for row_idx, row in enumerate(filtered_df.iter_rows(named=True)):
                             st.markdown(f"🔄 `{current_value:.2f}` → `{new_value:.2f}`")
                         else:
                             st.markdown(f"`{current_value:.2f}`")
+
+                    # Show permanent toggle if first bulletin
+                    if is_first_bulletin:
+                        permanent_key = f"permanent_{unique_key}_{added_rubric['code']}"
+                        if permanent_key not in st.session_state:
+                            st.session_state[permanent_key] = False
+
+                        is_permanent = st.toggle(
+                            f"Rubrique permanente (apparaîtra sur les prochains bulletins)",
+                            value=st.session_state[permanent_key],
+                            key=f"toggle_{permanent_key}",
+                            help="Cochez si cette rubrique doit apparaître automatiquement sur tous les bulletins futurs"
+                        )
+                        st.session_state[permanent_key] = is_permanent
+
+                        # Store permanent rubric preference in modifications
+                        if 'permanent_rubrics' not in st.session_state[mod_key]:
+                            st.session_state[mod_key]['permanent_rubrics'] = {}
+                        st.session_state[mod_key]['permanent_rubrics'][added_rubric['code']] = {
+                            'is_permanent': is_permanent,
+                            'field': field,
+                            'label': added_rubric['label']
+                        }
+
+                        st.markdown("---")
 
                 # Dropdown to add new rubric
                 st.markdown("---")
@@ -741,9 +779,13 @@ for row_idx, row in enumerate(filtered_df.iter_rows(named=True)):
                     if st.session_state[mod_key]:
                         try:
                             # Recalculate with modifications
+                            month, year = map(int, st.session_state.current_period.split('-'))
                             updated = recalculate_employee_payslip(
                                 dict(row),
-                                st.session_state[mod_key]
+                                st.session_state[mod_key],
+                                st.session_state.current_company,
+                                year,
+                                month
                             )
 
                             # Update DataFrame
@@ -791,7 +833,7 @@ for row_idx, row in enumerate(filtered_df.iter_rows(named=True)):
 
                         # Update DataFrame with modifications for this employee
                         for field, new_value in st.session_state[mod_key].items():
-                            if field not in ['charge_bases', 'charges_salariales', 'charges_patronales']:
+                            if field not in ['charge_bases', 'charges_salariales', 'charges_patronales', 'permanent_rubrics']:
                                 # Update only the row for this employee
                                 if field in df.columns:
                                     df = df.with_columns([
@@ -800,6 +842,19 @@ for row_idx, row in enumerate(filtered_df.iter_rows(named=True)):
                                         .otherwise(pl.col(field))
                                         .alias(field)
                                     ])
+
+                        # Save permanent rubrics if this is first bulletin
+                        if is_first_bulletin and 'permanent_rubrics' in st.session_state[mod_key]:
+                            for rubric_code, rubric_info in st.session_state[mod_key]['permanent_rubrics'].items():
+                                if rubric_info['is_permanent']:
+                                    DataManager.save_permanent_rubric(
+                                        st.session_state.current_company,
+                                        matricule,
+                                        rubric_code,
+                                        rubric_info['field'],
+                                        rubric_info['label'],
+                                        st.session_state.user
+                                    )
 
                         # Update session state with modified dataframe
                         st.session_state.processed_data = df

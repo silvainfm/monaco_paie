@@ -89,7 +89,13 @@ class IntegratedPayrollSystem:
 
             # Convert to list of dicts for processing
             for row in df.iter_rows(named=True):
-                payslip = self.calculator.process_employee_payslip(row)
+                # Get cumulative annual gross salary for plafond calculations
+                matricule = row.get('matricule', '')
+                cumul_brut_annuel = DataManager.get_cumul_brut_annuel(
+                    company_id, matricule, year, month
+                ) if matricule else 0.0
+
+                payslip = self.calculator.process_employee_payslip(row, cumul_brut_annuel=cumul_brut_annuel)
                 is_valid, issues = self.validator.validate_payslip(payslip)
 
                 if not is_valid or row.get('remarques') or row.get('date_sortie'):

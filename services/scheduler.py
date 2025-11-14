@@ -305,7 +305,13 @@ class PayrollScheduler:
             # Process payroll
             processed_data = []
             for _, row in df.iterrows():
-                payslip = calculator.process_employee_payslip(row.to_dict())
+                row_dict = row.to_dict()
+                matricule = row_dict.get('matricule', '')
+                cumul_brut_annuel = DataManager.get_cumul_brut_annuel(
+                    company_id, matricule, year, month
+                ) if matricule else 0.0
+
+                payslip = calculator.process_employee_payslip(row_dict, cumul_brut_annuel=cumul_brut_annuel)
                 is_valid, issues = validator.validate_payslip(payslip)
                 
                 if not is_valid:
