@@ -97,6 +97,48 @@ class DataManager:
                 ("maladie_date_debut", "DATE"),
                 ("maladie_date_fin", "DATE"),
                 ("taux_prelevement_source", "DOUBLE"),
+                # Rubric columns from acc_rem.xlsx
+                ("deduction_entree", "DOUBLE"),
+                ("deduction_depart", "DOUBLE"),
+                ("indem_preavis", "DOUBLE"),
+                ("prime_anciennete", "DOUBLE"),
+                ("prime_panier_chantier_sup_exo", "DOUBLE"),
+                ("prime_panier_chantier_inf_exo", "DOUBLE"),
+                ("indem_deplacement_inf_35km", "DOUBLE"),
+                ("indem_deplacement_sup_35km", "DOUBLE"),
+                ("heures_sup_200", "DOUBLE"),
+                ("heures_complementaires", "DOUBLE"),
+                ("prime_exceptionnelle", "DOUBLE"),
+                ("13eme_mois", "DOUBLE"),
+                ("14eme_mois", "DOUBLE"),
+                ("sentens_piens", "DOUBLE"),
+                ("commissions", "DOUBLE"),
+                ("heures_jours_feries_200", "DOUBLE"),
+                ("maintien_salaire", "DOUBLE"),
+                ("maintien_salaire_maladie", "DOUBLE"),
+                ("absence_non_remuneree", "DOUBLE"),
+                ("absence_conge_sans_solde", "DOUBLE"),
+                ("absence_maternite", "DOUBLE"),
+                ("maintien_salaire_maternite", "DOUBLE"),
+                ("absence_accident_de_travail", "DOUBLE"),
+                ("maintien_salaire_accident_travail", "DOUBLE"),
+                ("prime_de_precarite", "DOUBLE"),
+                ("indemnite_compens_conges_payes", "DOUBLE"),
+                ("indem_compensatrice_cp_n_1", "DOUBLE"),
+                ("indem_compensatrice_cp_n", "DOUBLE"),
+                ("indemnite_de_depart_a_la_retraite", "DOUBLE"),
+                ("indemnit_depart_retraite_volontaire", "DOUBLE"),
+                ("avantage_repas", "DOUBLE"),
+                ("avantage_voiture", "DOUBLE"),
+                ("avance_sur_salaire", "DOUBLE"),
+                ("acompte", "DOUBLE"),
+                ("prime_5_mc", "DOUBLE"),
+                ("prime_5_mc_cotisable", "DOUBLE"),
+                ("frais_de_teletravail", "DOUBLE"),
+                ("prime_de_panier_non_deductible", "DOUBLE"),
+                ("prime_de_panier_deductible", "DOUBLE"),
+                ("indemnite_de_licenciement", "DOUBLE"),
+                ("indemnite_de_congediement", "DOUBLE"),
             ]
 
             for col_name, col_type in missing_cols:
@@ -605,7 +647,23 @@ class DataManager:
                                          'salaire_net', 'cout_total_employeur', 'prelevement_source',
                                          'cumul_brut', 'cumul_base_ss', 'cumul_net_percu', 'cumul_charges_sal',
                                          'cumul_charges_pat', 'cp_acquis_n1', 'cp_pris_n1', 'cp_restants_n1',
-                                         'cp_acquis_n', 'cp_pris_n', 'cp_restants_n']
+                                         'cp_acquis_n', 'cp_pris_n', 'cp_restants_n',
+                                         # Rubric columns from acc_rem.xlsx
+                                         'deduction_entree', 'deduction_depart', 'indem_preavis', 'prime_anciennete',
+                                         'prime_panier_chantier_sup_exo', 'prime_panier_chantier_inf_exo',
+                                         'indem_deplacement_inf_35km', 'indem_deplacement_sup_35km', 'heures_sup_200',
+                                         'heures_complementaires', 'prime_exceptionnelle', '13eme_mois', '14eme_mois',
+                                         'sentens_piens', 'commissions', 'heures_jours_feries_200', 'maintien_salaire',
+                                         'maintien_salaire_maladie', 'absence_non_remuneree', 'absence_conge_sans_solde',
+                                         'absence_maternite', 'maintien_salaire_maternite', 'absence_accident_de_travail',
+                                         'maintien_salaire_accident_travail', 'prime_de_precarite',
+                                         'indemnite_compens_conges_payes', 'indem_compensatrice_cp_n_1',
+                                         'indem_compensatrice_cp_n', 'indemnite_de_depart_a_la_retraite',
+                                         'indemnit_depart_retraite_volontaire', 'avantage_repas', 'avantage_voiture',
+                                         'avance_sur_salaire', 'acompte', 'prime_5_mc', 'prime_5_mc_cotisable',
+                                         'frais_de_teletravail', 'prime_de_panier_non_deductible',
+                                         'prime_de_panier_deductible', 'indemnite_de_licenciement',
+                                         'indemnite_de_congediement']
         })
         schema.update({
             'date_entree': pl.Date,
@@ -613,6 +671,37 @@ class DataManager:
             'edge_case_flag': pl.Boolean
         })
         return pl.DataFrame(schema=schema)
+
+    @staticmethod
+    def get_cumul_brut_annuel(company_id: str, matricule: str, current_year: int, current_month: int) -> float:
+        """
+        Get cumulative gross salary for an employee for the year before the current period
+
+        Args:
+            company_id: Company identifier
+            matricule: Employee identifier
+            current_year: Current period year
+            current_month: Current period month
+
+        Returns:
+            Cumulative gross salary before current period
+        """
+        conn = DataManager.get_connection()
+
+        try:
+            result = conn.execute("""
+                SELECT COALESCE(SUM(salaire_brut), 0) as cumul
+                FROM payroll_data
+                WHERE company_id = ? AND matricule = ? AND period_year = ?
+                AND period_month < ?
+            """, [company_id, matricule, current_year, current_month]).fetchone()
+
+            return float(result[0]) if result else 0.0
+        except Exception as e:
+            logger.warning(f"Error getting cumul brut annuel: {e}")
+            return 0.0
+        finally:
+            DataManager.close_connection(conn)
 
 class DataAuditLogger:
     """Audit logger for data operations"""
@@ -814,37 +903,6 @@ class DataAuditLogger:
             """, [company_id, matricule, rubric_code])
         except Exception as e:
             logger.error(f"Error deleting permanent rubric: {e}")
-        finally:
-            DataManager.close_connection(conn)
-
-    @staticmethod
-    def get_cumul_brut_annuel(company_id: str, matricule: str, current_year: int, current_month: int) -> float:
-        """
-        Get cumulative gross salary for an employee for the year before the current period
-
-        Args:
-            company_id: Company identifier
-            matricule: Employee identifier
-            current_year: Current period year
-            current_month: Current period month
-
-        Returns:
-            Cumulative gross salary before current period
-        """
-        conn = DataManager.get_connection()
-
-        try:
-            result = conn.execute("""
-                SELECT COALESCE(SUM(salaire_brut), 0) as cumul
-                FROM payroll_data
-                WHERE company_id = ? AND matricule = ? AND period_year = ?
-                AND period_month < ?
-            """, [company_id, matricule, current_year, current_month]).fetchone()
-
-            return float(result[0]) if result else 0.0
-        except Exception as e:
-            logger.warning(f"Error getting cumul brut annuel: {e}")
-            return 0.0
         finally:
             DataManager.close_connection(conn)
 

@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from services.shared_utils import require_company_and_period, render_sidebar
 from services.auth import AuthManager
-from services.data_mgt import DataManager
+from services.data_mgt import DataManager, DataAuditLogger
 from services.payroll_calculations import ChargesSocialesMonaco
 from services.pdf_generation import PaystubPDFGenerator
 from services.payslip_helpers import (
@@ -222,7 +222,7 @@ for row_idx, row in enumerate(filtered_df.iter_rows(named=True)):
 
                 # Check if this is the first bulletin for this employee
                 month, year = map(int, st.session_state.current_period.split('-'))
-                is_first_bulletin = DataManager.is_first_bulletin(
+                is_first_bulletin = DataAuditLogger.is_first_bulletin(
                     st.session_state.current_company,
                     matricule,
                     year,
@@ -278,12 +278,18 @@ for row_idx, row in enumerate(filtered_df.iter_rows(named=True)):
 
                 # Display additional rubrics that were added
                 for idx, added_rubric in enumerate(st.session_state[additional_rubrics_key]):
-                    field = added_rubric['field']
+                    field = added_rubric.get('field_name', added_rubric.get('field'))
                     current_value = safe_get_numeric(row, field, 0.0)
+
+                    # Get calculation method as hint
+                    calcul = added_rubric.get('calcul', '')
+                    calc_hint = f"Calcul: {calcul}" if calcul and calcul not in ['nan', 'Montant', ''] else None
 
                     col1, col2, col3 = st.columns([3, 2, 2])
                     with col1:
                         st.markdown(f"**{added_rubric['label']}** `{added_rubric['code']}`")
+                        if calc_hint:
+                            st.caption(calc_hint)
                     with col2:
                         # Show field type based on name
                         if 'heures' in field or 'jours' in field:
@@ -359,7 +365,7 @@ for row_idx, row in enumerate(filtered_df.iter_rows(named=True)):
 
                     if selected != "-- Sélectionner une rubrique --":
                         # Find the selected rubric
-                        selected_code = selected.split(" - ")[0]
+                        selected_code = int(selected.split(" - ")[0])
                         selected_rubric = next(
                             (r for r in available_rubrics if r['code'] == selected_code),
                             None
@@ -370,7 +376,8 @@ for row_idx, row in enumerate(filtered_df.iter_rows(named=True)):
                             if selected_rubric not in st.session_state[additional_rubrics_key]:
                                 st.session_state[additional_rubrics_key].append(selected_rubric)
                                 # Initialize the field value to 0 in modifications
-                                st.session_state[mod_key][selected_rubric['field']] = 0.0
+                                field_name = selected_rubric.get('field_name', selected_rubric.get('field'))
+                                st.session_state[mod_key][field_name] = 0.0
                                 st.rerun()
                 else:
                     st.info("Toutes les rubriques disponibles sont déjà affichées")

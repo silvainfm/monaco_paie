@@ -7,17 +7,68 @@ Helper functions for payslip validation, editing, and data cleaning
 import json
 import streamlit as st
 import polars as pl
+import pandas as pd
 import numpy as np
 import math
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
+from functools import lru_cache
 from services.payroll_calculations import MonacoPayrollConstants, ChargesSocialesMonaco, CalculateurPaieMonaco
 from services.pdf_generation import PaystubPDFGenerator
 
 # ============================================================================
 # RUBRICS AND CODES
 # ============================================================================
+
+@lru_cache(maxsize=1)
+def load_rubrics_from_excel() -> List[Dict]:
+    """
+    Load salary rubrics from config/acc_rem.xlsx
+
+    Returns list of rubrics with filtering:
+    - Excludes rubrics with 'X' in 'Ajout automatique' (auto-added by system)
+    - Excludes rubrics with 'X' in 'Presence obligatoire' (mandatory presence)
+    - Returns rubrics available for manual addition
+
+    Returns:
+        List of dicts with keys: code, label, field_name, calcul,
+        cotisable_mc, cotisable_autres, base_cp, imposable
+    """
+    excel_path = Path("config") / "acc_rem.xlsx"
+
+    if not excel_path.exists():
+        return []
+
+    try:
+        df = pd.read_excel(excel_path)
+
+        rubrics = []
+        for _, row in df.iterrows():
+            # Filter logic: exclude auto and mandatory rubrics
+            ajout_auto = str(row.get('Ajout automatique', '')).strip().upper() == 'X'
+            presence_oblig = str(row.get('Presence obligatoire', '')).strip().upper() == 'X'
+
+            # Skip if auto-added or mandatory
+            if ajout_auto or presence_oblig:
+                continue
+
+            rubric = {
+                'code': int(row['Rémunération']),
+                'label': str(row['Libellé']),
+                'field_name': str(row['field_name']),
+                'calcul': str(row.get('Calcul', '')),
+                'cotisable_mc': str(row.get('Cotisable MC  ?', '')).strip().upper() == 'X',
+                'cotisable_autres': str(row.get('Cotisable autres cot ?', '')).strip().upper() == 'X',
+                'base_cp': str(row.get('Base CP', '')).strip().upper() == 'X',
+                'imposable': str(row.get('Imposable ?', '')).strip().upper() == 'X',
+            }
+            rubrics.append(rubric)
+
+        return rubrics
+    except Exception as e:
+        st.error(f"Erreur lors du chargement des rubriques: {e}")
+        return []
 
 def get_salary_rubrics() -> List[Dict]:
     """Get salary element rubrics from pdf_generation"""
@@ -82,17 +133,18 @@ def get_all_available_salary_rubrics(year: int = None) -> List[Dict]:
 
 def get_available_rubrics_for_employee(employee_data: Dict, year: int = None) -> List[Dict]:
     """Get rubrics not currently displayed for this employee"""
-    all_rubrics = get_all_available_salary_rubrics(year)
+    # Load rubrics from Excel (filtered for manual addition)
+    all_rubrics = load_rubrics_from_excel()
 
     # Get currently displayed fields (non-zero values)
     displayed_fields = set()
     for rubric in all_rubrics:
-        field = rubric['field']
+        field = rubric['field_name']
         if safe_get_numeric(employee_data, field, 0) != 0:
             displayed_fields.add(field)
 
     # Filter out displayed rubrics
-    available = [r for r in all_rubrics if r['field'] not in displayed_fields]
+    available = [r for r in all_rubrics if r['field_name'] not in displayed_fields]
 
     return available
 
