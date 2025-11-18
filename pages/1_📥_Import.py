@@ -55,9 +55,9 @@ with tab1:
             st.success(f"✅ {len(df_import)} employés importés avec succès")
 
             st.subheader("Aperçu des données importées")
-            st.dataframe(df_import.head(10), use_container_width=True)
+            st.dataframe(df_import.head(10), width='stretch')
 
-            if st.button("💾 Sauvegarder les données", type="primary", use_container_width=True):
+            if st.button("💾 Sauvegarder les données", type="primary", width='stretch'):
                 month, year = map(int, st.session_state.current_period.split('-'))
 
                 DataManager.save_period_data(
@@ -83,7 +83,7 @@ with tab2:
     - Absences et congés
     """)
 
-    if st.button("📥 Générer le template", use_container_width=True):
+    if st.button("📥 Générer le template", width='stretch'):
         template_buffer = system.excel_manager.create_template()
 
         st.download_button(

@@ -123,6 +123,6 @@ if 'edge_case_flag' in df.columns:
         if 'edge_case_reason' in edge_cases_df.columns:
             display_cols.append('edge_case_reason')
 
-        st.dataframe(edge_cases_df.select(display_cols), use_container_width=True)
+        st.dataframe(edge_cases_df.select(display_cols), width='stretch')
     else:
         st.success("Aucun cas particulier détecté")

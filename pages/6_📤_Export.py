@@ -81,7 +81,7 @@ with tab1:
         total_net = df.select(pl.col('salaire_net').sum()).item() if 'salaire_net' in df.columns else 0
         st.metric("Net à payer", f"{total_net:,.0f} €")
 
-    if st.button("📥 Générer Excel", type="primary", use_container_width=True):
+    if st.button("📥 Générer Excel", type="primary", width='stretch'):
         try:
 
             output = io.BytesIO()
@@ -179,7 +179,7 @@ with tab1:
                 data=output.getvalue(),
                 file_name=f"paies_{st.session_state.current_company}_{st.session_state.current_period}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
+                width='stretch'
             )
 
             st.success("✅ Fichier Excel généré avec succès!")
@@ -201,7 +201,7 @@ with tab1:
 with tab2:
     st.info("📋 **Rapport de synthèse**")
 
-    if st.button("Voir rapport", use_container_width=True):
+    if st.button("Voir rapport", width='stretch'):
         st.markdown("---")
         st.subheader("Rapport de synthèse")
 
@@ -254,7 +254,7 @@ with tab2:
                 pl.col('salaire_brut').sum().alias('Masse_Brute'),
             ]) if 'salaire_brut' in df.columns else df.group_by('statut_validation').agg(pl.count().alias('Nombre'))
 
-            st.dataframe(status_breakdown.to_pandas(), use_container_width=True)
+            st.dataframe(status_breakdown.to_pandas(), width='stretch')
 
         # Charge breakdown if available
         if 'total_charges_salariales' in df.columns and 'total_charges_patronales' in df.columns:
@@ -408,7 +408,7 @@ with tab3:
 
         st.markdown("---")
 
-        submit_button = st.form_submit_button("📧 Envoyer l'email de validation", use_container_width=True, type="primary")
+        submit_button = st.form_submit_button("📧 Envoyer l'email de validation", width='stretch', type="primary")
 
     if submit_button:
         if not client_email:
@@ -569,7 +569,7 @@ with tab4:
                 default_teletravail = st.selectbox("Télétravail", ["Non", "Oui"], index=0, key="dsm_tt")
                 default_admin_salarie = st.selectbox("Admin salarié", ["Non", "Oui"], index=0, key="dsm_admin")
 
-            if st.button("📝 Appliquer aux employés", use_container_width=True, key="apply_dsm_defaults"):
+            if st.button("📝 Appliquer aux employés", width='stretch', key="apply_dsm_defaults"):
                 df = df.with_columns([
                     pl.when(pl.col('affiliation_ac').is_null())
                     .then(pl.lit(default_affiliation_ac))
@@ -615,7 +615,7 @@ with tab4:
                 display_cols = ['matricule', 'nom', 'prenom']
                 if 'date_naissance' in missing_fields_df.columns:
                     display_cols.append('date_naissance')
-                st.dataframe(missing_fields_df.select(display_cols).to_pandas(), use_container_width=True)
+                st.dataframe(missing_fields_df.select(display_cols).to_pandas(), width='stretch')
 
         # Summary
         st.markdown("---")
@@ -642,7 +642,7 @@ with tab4:
         col1, col2, col3 = st.columns([1, 1, 1])
 
         with col2:
-            generate_button = st.button("📄 Générer DSM", type="primary", use_container_width=True)
+            generate_button = st.button("📄 Générer DSM", type="primary", width='stretch')
 
         if generate_button:
             try:
@@ -663,7 +663,7 @@ with tab4:
                             data=xml_buffer.getvalue(),
                             file_name=f"DSM_{employer_number}_{st.session_state.current_period}.xml",
                             mime="application/xml",
-                            use_container_width=True
+                            width='stretch'
                         )
 
                     with st.expander("👁️ Aperçu XML"):

@@ -128,7 +128,7 @@ with tab1:
         col1, col2 = st.columns(2)
 
         with col1:
-            if st.button("📄 Générer bulletin individuel", type="primary", use_container_width=True):
+            if st.button("📄 Générer bulletin individuel", type="primary", width='stretch'):
                 if selected_employee:
                     try:
                         # Extract matricule from selection
@@ -178,7 +178,7 @@ with tab1:
                     data=pdf_data['buffer'],
                     file_name=pdf_data['filename'],
                     mime="application/pdf",
-                    use_container_width=True
+                    width='stretch'
                 )
 
     else:  # Tous les bulletins
@@ -195,7 +195,7 @@ with tab1:
         col1, col2 = st.columns(2)
 
         with col1:
-            if st.button("📚 Générer tous les bulletins", type="primary", use_container_width=True):
+            if st.button("📚 Générer tous les bulletins", type="primary", width='stretch'):
                 try:
                     with st.spinner("Génération de tous les bulletins en cours..."):
                         # Add period information to all employees
@@ -257,7 +257,7 @@ with tab1:
                     data=pdf_data['buffer'],
                     file_name=pdf_data['filename'],
                     mime="application/zip",
-                    use_container_width=True
+                    width='stretch'
                 )
 
 with tab2:
@@ -278,7 +278,7 @@ with tab2:
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("📊 Générer journal de paie", type="primary", use_container_width=True):
+        if st.button("📊 Générer journal de paie", type="primary", width='stretch'):
             try:
                 with st.spinner("Génération du journal en cours..."):
                     employees_data = df.to_dicts()
@@ -308,7 +308,7 @@ with tab2:
                 data=pdf_data['buffer'],
                 file_name=pdf_data['filename'],
                 mime="application/pdf",
-                use_container_width=True
+                width='stretch'
             )
 
 with tab3:
@@ -324,7 +324,7 @@ with tab3:
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("💰 Générer provision CP", type="primary", use_container_width=True):
+        if st.button("💰 Générer provision CP", type="primary", width='stretch'):
             try:
                 with st.spinner("Génération de la provision en cours..."):
                     # Prepare provisions data
@@ -363,7 +363,7 @@ with tab3:
                 data=pdf_data['buffer'],
                 file_name=pdf_data['filename'],
                 mime="application/pdf",
-                use_container_width=True
+                width='stretch'
             )
 
 with tab4:
@@ -380,7 +380,7 @@ with tab4:
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("📊 Générer état charges sociales", type="primary", use_container_width=True):
+        if st.button("📊 Générer état charges sociales", type="primary", width='stretch'):
             try:
                 with st.spinner("Génération de l'état des charges sociales..."):
                     # Clean data for PDF
@@ -416,7 +416,7 @@ with tab4:
                 data=pdf_data['buffer'],
                 file_name=pdf_data['filename'],
                 mime="application/pdf",
-                use_container_width=True
+                width='stretch'
             )
 
     st.markdown("""
@@ -461,7 +461,7 @@ with tab5:
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("📋 Générer récapitulatif annuel", type="primary", use_container_width=True):
+        if st.button("📋 Générer récapitulatif annuel", type="primary", width='stretch'):
             try:
                 with st.spinner(f"Génération du récapitulatif {year_selector}..."):
                     recap_buffer = pdf_service.generate_recap_paie_pdf(
@@ -495,7 +495,7 @@ with tab5:
                 data=pdf_data['buffer'],
                 file_name=pdf_data['filename'],
                 mime="application/pdf",
-                use_container_width=True
+                width='stretch'
             )
 
 # Add some helpful information at the bottom

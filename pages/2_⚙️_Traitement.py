@@ -59,7 +59,7 @@ if send_email:
                                      value="comptable@example.com",
                                      help="Email pour recevoir le rapport de traitement")
 
-if st.button("Lancer le traitement", type="primary", use_container_width=False):
+if st.button("Lancer le traitement", type="primary", width='content'):
     with st.spinner("Traitement en cours..."):
         report = system.process_monthly_payroll(
             st.session_state.current_company,
@@ -189,7 +189,7 @@ if st.button("Lancer le traitement", type="primary", use_container_width=False):
                             file_name=f"rapport_agent_{st.session_state.current_company}_{st.session_state.current_period}_{agent_report.timestamp.strftime('%Y%m%d_%H%M%S')}.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             help="Rapport complet avec toutes les modifications, anomalies et tendances",
-                            use_container_width=True
+                            width='stretch'
                         )
                     except Exception as e:
                         st.error(f"Erreur lors de la génération du rapport Excel: {e}")
@@ -203,7 +203,7 @@ if st.button("Lancer le traitement", type="primary", use_container_width=False):
                         file_name=f"rapport_agent_{st.session_state.current_company}_{st.session_state.current_period}_{agent_report.timestamp.strftime('%Y%m%d_%H%M%S')}.json",
                         mime="application/json",
                         help="Format JSON pour traitement automatique",
-                        use_container_width=True
+                        width='stretch'
                     )
 
                 # Send email if requested

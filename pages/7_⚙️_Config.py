@@ -81,7 +81,7 @@ with tab2:
     users = AuthManager.list_users()
     if users:
         users_df = pl.DataFrame(users)
-        st.dataframe(users_df.select(['username', 'name', 'role']), use_container_width=True)
+        st.dataframe(users_df.select(['username', 'name', 'role']), width='stretch')
     else:
         st.info("Aucun utilisateur trouvé")
 
@@ -235,10 +235,10 @@ with tab4:
         col1, col2, col3 = st.columns([1, 1, 2])
 
         with col1:
-            save_button = st.form_submit_button("💾 Sauvegarder", use_container_width=True)
+            save_button = st.form_submit_button("💾 Sauvegarder", width='stretch')
 
         with col2:
-            test_button = st.form_submit_button("🧪 Tester", use_container_width=True)
+            test_button = st.form_submit_button("🧪 Tester", width='stretch')
 
     if save_button:
         try:
