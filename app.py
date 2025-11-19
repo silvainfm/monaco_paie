@@ -170,16 +170,6 @@ def main_app():
     """Application principale avec navigation sidebar"""
 
     with st.sidebar:
-        st.markdown("""
-            <div style="padding: 1rem 0; border-bottom: 1px solid #e8e8e8; margin-bottom: 1.5rem;">
-                <h3 style="margin: 0; color: #2c3e50;">Paie Monégasque</h3>
-                <div style="margin-top: 0.5rem; color: #6c757d; font-size: 0.9rem;">
-                    <div>👤 {}</div>
-                    <div>🔐 {}</div>
-                </div>
-            </div>
-        """.format(st.session_state.user, st.session_state.role), unsafe_allow_html=True)
-
         st.markdown("**Entreprise**")
         companies = load_companies_cached()
         company_names = [c['name'] for c in companies]
@@ -227,7 +217,15 @@ def main_app():
             key="sidebar_period_selector"
         )
 
-        st.markdown("---")
+        st.markdown("""
+            <div style="padding: 1rem 0; border-bottom: 1px solid #e8e8e8; margin-bottom: 1.5rem;">
+                <h3 style="margin: 0; color: #2c3e50;">Paie Monégasque</h3>
+                <div style="margin-top: 0.5rem; color: #6c757d; font-size: 0.9rem;">
+                    <div>👤 {}</div>
+                    <div>🔐 {}</div>
+                </div>
+            </div>
+        """.format(st.session_state.user, st.session_state.role), unsafe_allow_html=True)
 
         if st.button("Déconnexion", use_container_width=True):
             for key in list(st.session_state.keys()):

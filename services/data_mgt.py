@@ -283,6 +283,44 @@ class DataManager:
         DataManager.migrate_schema()
     
     @staticmethod
+    def check_existing_employees(df: pl.DataFrame, company_id: str, month: int, year: int) -> Dict:
+        """
+        Check which employees in the import already exist for this period
+
+        Returns:
+            Dict with 'existing', 'new', 'existing_matricules' lists
+        """
+        conn = DataManager.get_connection()
+
+        try:
+            # Get matricules from import
+            if 'matricule' not in df.columns:
+                return {'existing': [], 'new': [], 'existing_matricules': []}
+
+            import_matricules = df.select('matricule').unique().to_series().to_list()
+
+            # Query existing matricules for this period
+            placeholders = ','.join(['?' for _ in import_matricules])
+            existing_result = conn.execute(f"""
+                SELECT DISTINCT matricule, nom, prenom
+                FROM payroll_data
+                WHERE company_id = ? AND period_year = ? AND period_month = ?
+                AND matricule IN ({placeholders})
+            """, [company_id, year, month] + import_matricules).fetchall()
+
+            existing_matricules = [row[0] for row in existing_result]
+            existing_employees = [{'matricule': row[0], 'nom': row[1], 'prenom': row[2]} for row in existing_result]
+            new_matricules = [m for m in import_matricules if m not in existing_matricules]
+
+            return {
+                'existing': existing_employees,
+                'new': new_matricules,
+                'existing_matricules': existing_matricules
+            }
+        finally:
+            DataManager.close_connection(conn)
+
+    @staticmethod
     def save_period_data(df: pl.DataFrame, company_id: str, month: int, year: int):
         """Save period data (upsert operation) - optimized for bulk insert"""
         conn = DataManager.get_connection()
@@ -313,11 +351,22 @@ class DataManager:
                             ).alias(col)
                         )
 
-            # Delete existing period data
-            conn.execute("""
-                DELETE FROM payroll_data
-                WHERE company_id = ? AND period_year = ? AND period_month = ?
-            """, [company_id, year, month])
+            # Delete only the specific employees being imported (not all period data)
+            # This allows partial imports without losing other employees
+            if 'matricule' in df.columns:
+                import_matricules = df.select('matricule').unique().to_series().to_list()
+                placeholders = ','.join(['?' for _ in import_matricules])
+                conn.execute(f"""
+                    DELETE FROM payroll_data
+                    WHERE company_id = ? AND period_year = ? AND period_month = ?
+                    AND matricule IN ({placeholders})
+                """, [company_id, year, month] + import_matricules)
+            else:
+                # Fallback: delete all if no matricule column (shouldn't happen)
+                conn.execute("""
+                    DELETE FROM payroll_data
+                    WHERE company_id = ? AND period_year = ? AND period_month = ?
+                """, [company_id, year, month])
 
             # Get database columns in order
             db_cols = [row[1] for row in conn.execute("PRAGMA table_info(payroll_data)").fetchall()]
