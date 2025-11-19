@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Data (don't include in image, use volumes)
+data/*.duckdb
+data/*.duckdb.wal
+backups/
+*.csv
+*.xlsx
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Git
+.git/
+.gitignore
+
+# Docs
+*.md
+!README.md
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+temp/
+inspect_db.py
+common_queries.sh
+db_cheatsheet.md

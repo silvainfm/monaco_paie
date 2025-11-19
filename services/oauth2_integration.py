@@ -35,7 +35,7 @@ class OAuth2Config:
         'https://graph.microsoft.com/Mail.ReadWrite'
     ]
     
-    def __init__(self, config_dir: Path = Path("config")):
+    def __init__(self, config_dir: Path = Path("data/config")):
         self.config_dir = Path(config_dir)
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self.microsoft_config_file = self.config_dir / "microsoft_oauth.json"
@@ -294,7 +294,7 @@ class MicrosoftOAuth2Service:
 class OAuth2EmailManager:
     """Unified OAuth2 Email Manager"""
     
-    def __init__(self, config_dir: Path = Path("config")):
+    def __init__(self, config_dir: Path = Path("data/config")):
         self.config = OAuth2Config(config_dir)
         self.microsoft_service = MicrosoftOAuth2Service(self.config)
         self.active_service = None

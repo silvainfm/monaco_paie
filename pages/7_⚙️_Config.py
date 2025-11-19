@@ -18,7 +18,7 @@ from services.auth import AuthManager
 from services.email_archive import EmailConfig, EmailConfigManager
 from services.payslip_helpers import audit_log_page
 
-CONFIG_DIR = Path("config")
+CONFIG_DIR = Path("data/config")
 
 st.set_page_config(page_title="Config", page_icon="⚙️", layout="wide")
 
@@ -148,7 +148,7 @@ with tab3:
             st.rerun()
 
 with tab4:
-    config_manager = EmailConfigManager(Path("config/email_config.json"))
+    config_manager = EmailConfigManager(Path("data/config/email_config.json"))
 
     # Charger la configuration existante
     existing_config = config_manager.load_config()

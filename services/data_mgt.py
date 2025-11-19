@@ -281,6 +281,10 @@ class DataManager:
 
         # Run migration to add missing columns
         DataManager.migrate_schema()
+
+        # Initialize and migrate audit table
+        DataAuditLogger.init_audit_table()
+        DataAuditLogger.migrate_audit_table()
     
     @staticmethod
     def check_existing_employees(df: pl.DataFrame, company_id: str, month: int, year: int) -> Dict:
@@ -772,7 +776,9 @@ class DataAuditLogger:
                     period_month INTEGER,
                     details JSON,
                     ip_address VARCHAR,
-                    record_count INTEGER
+                    record_count INTEGER,
+                    resource VARCHAR,
+                    success BOOLEAN DEFAULT TRUE
                 )
             """)
 
@@ -803,20 +809,56 @@ class DataAuditLogger:
             DataManager.close_connection(conn)
     
     @staticmethod
-    def log(user: str, action: str, company_id: str, year: int, month: int,
-            details: Optional[Dict] = None, record_count: Optional[int] = None):
-        """Log data operation"""
+    def log(user: str, action: str, company_id: str = '', year: int = 0, month: int = 0,
+            details: Optional[Dict] = None, record_count: Optional[int] = None,
+            ip_address: str = '', resource: str = '', success: bool = True):
+        """
+        Log audit event (data operations or security events)
+
+        Args:
+            user: Username performing action
+            action: Action type (LOGIN, SAVE_DATA, IMPORT, EXPORT, etc.)
+            company_id: Company identifier (optional)
+            year: Period year (optional)
+            month: Period month (optional)
+            details: Additional details as dict (optional)
+            record_count: Number of records affected (optional)
+            ip_address: User IP address (optional)
+            resource: Resource accessed (optional)
+            success: Whether action succeeded
+        """
         conn = DataManager.get_connection()
 
         try:
             import json
             details_json = json.dumps(details) if details else None
 
+            # Convert empty strings to NULL for optional fields
+            company_id = company_id if company_id else None
+            year = year if year > 0 else None
+            month = month if month > 0 else None
+            ip_address = ip_address if ip_address else None
+
+            # Ensure table exists (lazy initialization)
+            try:
+                conn.execute("SELECT 1 FROM audit_log LIMIT 1")
+            except:
+                # Table doesn't exist, create it
+                DataAuditLogger.init_audit_table()
+                DataAuditLogger.migrate_audit_table()
+                # Reconnect after table creation
+                DataManager.close_connection(conn)
+                conn = DataManager.get_connection()
+
             conn.execute("""
                 INSERT INTO audit_log
-                (user, action, company_id, period_year, period_month, details, record_count)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, [user, action, company_id, year, month, details_json, record_count])
+                (user, action, company_id, period_year, period_month, details,
+                 record_count, ip_address, resource, success)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [user, action, company_id, year, month, details_json,
+                  record_count, ip_address, resource, success])
+        except Exception as e:
+            logger.warning(f"Error logging audit event: {e}")
         finally:
             DataManager.close_connection(conn)
     
@@ -875,6 +917,97 @@ class DataAuditLogger:
             except Exception as e:
                 logger.warning(f"Error loading user activity: {e}")
                 return pl.DataFrame()
+        finally:
+            DataManager.close_connection(conn)
+
+    @staticmethod
+    def get_failed_logins(hours: int = 24) -> pl.DataFrame:
+        """
+        Get failed login attempts in last N hours
+
+        Returns:
+            DataFrame with failed logins
+        """
+        conn = DataManager.get_connection()
+
+        try:
+            try:
+                result = conn.execute("""
+                    SELECT * FROM audit_log
+                    WHERE action = 'LOGIN'
+                        AND success = FALSE
+                        AND timestamp >= CURRENT_TIMESTAMP - INTERVAL ? HOUR
+                    ORDER BY timestamp DESC
+                """, [hours]).pl()
+                return result
+            except Exception as e:
+                logger.warning(f"Error loading failed logins: {e}")
+                return pl.DataFrame()
+        finally:
+            DataManager.close_connection(conn)
+
+    @staticmethod
+    def export_audit_logs(output_path: Path, start_date: Optional[datetime] = None,
+                         end_date: Optional[datetime] = None) -> int:
+        """
+        Export audit logs to CSV for archival/compliance
+
+        Args:
+            output_path: Output file path (.csv)
+            start_date: Optional start date filter
+            end_date: Optional end date filter
+
+        Returns:
+            Number of records exported
+        """
+        conn = DataManager.get_connection()
+
+        try:
+            query = "SELECT * FROM audit_log WHERE 1=1"
+            params = []
+
+            if start_date:
+                query += " AND timestamp >= ?"
+                params.append(start_date)
+
+            if end_date:
+                query += " AND timestamp <= ?"
+                params.append(end_date)
+
+            query += " ORDER BY timestamp DESC"
+
+            result = conn.execute(query, params).pl()
+            result.write_csv(output_path)
+
+            logger.info(f"Exported {result.height} audit log entries to {output_path}")
+            return result.height
+
+        except Exception as e:
+            logger.error(f"Error exporting audit logs: {e}")
+            raise
+        finally:
+            DataManager.close_connection(conn)
+
+    @staticmethod
+    def migrate_audit_table():
+        """Add missing columns to audit_log table if they don't exist"""
+        conn = DataManager.get_connection()
+
+        try:
+            # Check existing columns
+            existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(audit_log)").fetchall()}
+
+            # Add missing columns
+            if 'resource' not in existing_cols:
+                conn.execute("ALTER TABLE audit_log ADD COLUMN resource VARCHAR")
+                logger.info("Added resource column to audit_log")
+
+            if 'success' not in existing_cols:
+                conn.execute("ALTER TABLE audit_log ADD COLUMN success BOOLEAN DEFAULT TRUE")
+                logger.info("Added success column to audit_log")
+
+        except Exception as e:
+            logger.warning(f"Error during audit table migration: {e}")
         finally:
             DataManager.close_connection(conn)
 

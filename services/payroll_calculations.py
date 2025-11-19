@@ -27,7 +27,7 @@ class MonacoPayrollConstants:
 
     def _load_constants_from_csv(self):
         """Load constants from CSV file for the specific year"""
-        csv_path = Path("config") / "payroll_rates.csv"
+        csv_path = Path("data/config") / "payroll_rates.csv"
 
         # Default values (2024)
         defaults = {
@@ -158,7 +158,7 @@ class ChargesSocialesMonaco:
 
     def _load_rates_from_csv(self):
         """Load social charge rates from unified CSV file"""
-        csv_path = Path("config") / "payroll_rates.csv"
+        csv_path = Path("data/config") / "payroll_rates.csv"
         
         # Default rates for fallback
         default_salarial = {
@@ -788,7 +788,7 @@ class GestionnaireCongesPayes:
 # Utility functions for managing rates
 def add_year_to_rates_csv(year: int):
     """Add a new year column to the existing rates CSV"""
-    csv_path = Path("config") / "payroll_rates.csv"
+    csv_path = Path("data/config") / "payroll_rates.csv"
     
     if not csv_path.exists():
         # Create default CSV first
@@ -825,7 +825,7 @@ def update_rate_in_csv(year: int, category: str, rate_type: str, code: str, new_
         code: The code of the rate (e.g., 'CAR', 'CCSS')
         new_rate: The new rate value
     """
-    csv_path = Path("config") / "payroll_rates.csv"
+    csv_path = Path("data/config") / "payroll_rates.csv"
     
     if not csv_path.exists():
         print("Rates CSV does not exist. Creating default...")
@@ -854,7 +854,7 @@ def update_rate_in_csv(year: int, category: str, rate_type: str, code: str, new_
 
 def display_rates_for_year(year: int):
     """Display all rates for a specific year"""
-    csv_path = Path("config") / "payroll_rates.csv"
+    csv_path = Path("data/config") / "payroll_rates.csv"
     
     if not csv_path.exists():
         print("Rates CSV does not exist")
@@ -892,7 +892,7 @@ def display_rates_for_year(year: int):
 # Example usage
 if __name__ == "__main__":
     # Create or ensure rates CSV exists
-    csv_path = Path("config") / "payroll_rates.csv"
+    csv_path = Path("data/config") / "payroll_rates.csv"
     if not csv_path.exists():
         print("Creating default rates CSV...")
         constants = MonacoPayrollConstants(2024)

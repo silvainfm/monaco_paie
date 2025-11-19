@@ -29,7 +29,7 @@ class IntegratedPayrollSystem:
 
     def __init__(self, config_dir: Path = None):
         """Initialiser le système complet"""
-        self.config_dir = config_dir or Path("config")
+        self.config_dir = config_dir or Path("data/config")
         self.calculator = CalculateurPaieMonaco()
         self.validator = ValidateurPaieMonaco()
         self.pto_manager = GestionnaireCongesPayes()

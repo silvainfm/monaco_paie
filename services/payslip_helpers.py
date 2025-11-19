@@ -35,7 +35,7 @@ def load_rubrics_from_excel() -> List[Dict]:
         List of dicts with keys: code, label, field_name, calcul,
         cotisable_mc, cotisable_autres, base_cp, imposable
     """
-    excel_path = Path("config") / "acc_rem.xlsx"
+    excel_path = Path("data/config") / "acc_rem.xlsx"
 
     if not excel_path.exists():
         return []
@@ -112,7 +112,7 @@ def get_all_available_salary_rubrics(year: int = None) -> List[Dict]:
     ])
 
     # Add constants from MonacoPayrollConstants CSV
-    csv_path = Path("config") / "payroll_rates.csv"
+    csv_path = Path("data/config") / "payroll_rates.csv"
     if csv_path.exists():
         try:
             df = pl.read_csv(csv_path)

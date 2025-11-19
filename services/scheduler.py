@@ -102,7 +102,7 @@ class ScheduledJob:
 class PayrollScheduler:
     """Main scheduler for automatic payroll processing"""
     
-    def __init__(self, config_dir: Path = Path("config"), data_dir: Path = Path("data")):
+    def __init__(self, config_dir: Path = Path("data/config"), data_dir: Path = Path("data")):
         self.config_dir = Path(config_dir)
         self.data_dir = Path(data_dir)
         self.jobs_file = self.config_dir / "scheduled_jobs.json"

@@ -2122,7 +2122,7 @@ class ChargesSocialesPDFGenerator:
     def _load_rates(self) -> Dict:
         """Charger les taux depuis le CSV pour avoir les descriptions et codes DSM"""
         rates = {}
-        csv_path = Path("config") / "payroll_rates.csv"
+        csv_path = Path("data/config") / "payroll_rates.csv"
 
         if csv_path.exists():
             try:

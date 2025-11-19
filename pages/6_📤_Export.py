@@ -274,7 +274,7 @@ with tab3:
     st.info("📋 **Envoyer les bulletins pour validation client**")
     
     # Vérifier la configuration email
-    config_path = Path("config/email_config.json")
+    config_path = Path("data/config/email_config.json")
     if not config_path.exists():
         st.error("❌ Configuration email non trouvée. Veuillez d'abord configurer l'email dans la page Configuration.")
         if st.button("➡️ Aller à la configuration"):
@@ -527,7 +527,7 @@ with tab4:
                                 st.error("Le numéro doit être exactement 5 chiffres")
                             else:
                                 company_info['employer_number_monaco'] = new_employer_number
-                                config_file = Path("config/company_info.json")
+                                config_file = Path("data/config/company_info.json")
                                 with open(config_file, 'w', encoding='utf-8') as f:
                                     json.dump(company_info, f, indent=2)
                                 st.success("✅ Numéro d'employeur sauvegardé!")

@@ -10,7 +10,7 @@ streamlit run app.py
 import streamlit as st
 from services.auth import AuthManager
 from services.payroll_system import IntegratedPayrollSystem
-from services.data_mgt import DataManager
+from services.data_mgt import DataManager, DataAuditLogger
 import duckdb
 from pathlib import Path
 from datetime import datetime
@@ -157,9 +157,25 @@ def login_page():
                     st.session_state.user = user['username']
                     st.session_state.role = user['role']
                     st.session_state.payroll_system = IntegratedPayrollSystem()
+
+                    # Log successful login
+                    DataAuditLogger.log(
+                        user=user['username'],
+                        action='LOGIN',
+                        details={'role': user['role']},
+                        success=True
+                    )
+
                     st.success(f"Bienvenue, {user['name']}!")
                     st.rerun()
                 else:
+                    # Log failed login
+                    DataAuditLogger.log(
+                        user=username,
+                        action='LOGIN',
+                        details={'error': 'Failed authentication'},
+                        success=False
+                    )
                     st.error("Nom d'utilisateur ou mot de passe incorrect")
 
 # ========================

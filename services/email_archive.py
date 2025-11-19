@@ -1453,7 +1453,7 @@ class ComplianceAuditLogger:
         }
 
 # Fonction principale pour l'intégration
-def create_email_distribution_system(config_path: str = "config/email_config.json",
+def create_email_distribution_system(config_path: str = "data/config/email_config.json",
                                     archive_path: str = "data/email_archives") -> Dict:
     """
     Créer et configurer le système complet de distribution email
