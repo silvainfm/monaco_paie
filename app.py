@@ -234,7 +234,7 @@ def main_app():
         )
 
         st.markdown("""
-            <div style="padding: 1rem 0; border-bottom: 1px solid #e8e8e8; margin-bottom: 1.5rem;">
+            <div style="padding: 1rem 0; border-bottom: 1px solid #e8e8e8; margin-bottom: 1rem;">
                 <h3 style="margin: 0; color: #2c3e50;">Paie Monégasque</h3>
                 <div style="margin-top: 0.5rem; color: #6c757d; font-size: 0.9rem;">
                     <div>👤 {}</div>
