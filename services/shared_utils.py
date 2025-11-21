@@ -146,25 +146,22 @@ def load_period_data_cached(company_id: str, month: int, year: int):
 
 @st.cache_data(ttl=300)
 def load_salary_trend_data(company_id: str, month: int, year: int, n_months: int = 6):
-    """Load salary trend data for last n months - returns aggregated by period"""
-    start_year, start_month, end_year, end_month = get_last_n_months(month, year, n_months)
+    """
+    Load salary trend data for last n months (OPTIMIZED: uses DuckDB aggregations)
+    Returns aggregated by period without loading all raw data
+    """
+    # Use optimized DuckDB aggregation method (memory efficient)
+    trend = DataManager.get_monthly_aggregations(company_id, year - 1, n_months)
 
-    df = DataManager.get_period_range(company_id, start_year, start_month, end_year, end_month)
-
-    if df.is_empty():
+    if trend.is_empty():
         return pl.DataFrame()
 
-    # Drop Object dtype columns before aggregation
-    object_cols = [col for col in df.columns if df[col].dtype == pl.Object]
-    if object_cols:
-        df = df.drop(object_cols)
-
-    # Aggregate by period
-    trend = df.group_by(['period_year', 'period_month']).agg([
-        pl.col('salaire_brut').sum().alias('total_brut'),
-        pl.col('salaire_net').sum().alias('total_net'),
-        pl.col('matricule').count().alias('nb_employees')
-    ]).sort(['period_year', 'period_month'])
+    # Rename columns to match expected format
+    trend = trend.rename({
+        'total_brut': 'total_brut',
+        'total_net': 'total_net',
+        'employee_count': 'nb_employees'
+    })
 
     # Add period label for display
     trend = trend.with_columns(

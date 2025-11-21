@@ -452,7 +452,100 @@ class DataManager:
             return result
         finally:
             DataManager.close_connection(conn)
-    
+
+    @staticmethod
+    def get_period_data_paginated(company_id: str, year: int, month: int,
+                                   limit: int = 20, offset: int = 0) -> pl.DataFrame:
+        """
+        Get period data with pagination (memory efficient for UI display)
+        Loads only requested page of employees instead of all
+
+        Args:
+            company_id: Company identifier
+            year: Period year
+            month: Period month
+            limit: Number of rows per page (default 20)
+            offset: Starting row (default 0)
+
+        Returns:
+            Polars DataFrame with requested page of employees
+        """
+        conn = DataManager.get_connection()
+
+        try:
+            try:
+                # Load only requested page
+                result = conn.execute("""
+                    SELECT
+                        * EXCLUDE (details_charges, tickets_restaurant_details),
+                        CAST(details_charges AS VARCHAR) as details_charges,
+                        CAST(tickets_restaurant_details AS VARCHAR) as tickets_restaurant_details
+                    FROM payroll_data
+                    WHERE company_id = ? AND period_year = ? AND period_month = ?
+                    ORDER BY matricule
+                    LIMIT ? OFFSET ?
+                """, [company_id, year, month, limit, offset]).pl()
+            except Exception as e:
+                logger.warning(f"Error loading paginated period data: {e}")
+                return DataManager.create_empty_df()
+
+            if result.height == 0:
+                return DataManager.create_empty_df()
+
+            # Parse JSON columns only for displayed rows (much more efficient)
+            import json
+            struct_columns = ['details_charges', 'tickets_restaurant_details']
+
+            for col in struct_columns:
+                if col in result.columns and result[col].dtype == pl.Utf8:
+                    try:
+                        result = result.with_columns(
+                            pl.col(col).str.json_decode().alias(col)
+                        )
+                    except:
+                        # Fallback to manual parsing if needed
+                        def safe_json_parse(x):
+                            if x is None or x == '' or x == 'null':
+                                return None
+                            try:
+                                return json.loads(x)
+                            except:
+                                return None
+
+                        result = result.with_columns(
+                            pl.col(col).map_elements(
+                                safe_json_parse,
+                                return_dtype=pl.Object
+                            ).alias(col)
+                        )
+
+            return result
+        finally:
+            DataManager.close_connection(conn)
+
+    @staticmethod
+    def get_period_row_count(company_id: str, year: int, month: int) -> int:
+        """
+        Get total number of employees for a period (for pagination)
+
+        Args:
+            company_id: Company identifier
+            year: Period year
+            month: Period month
+
+        Returns:
+            Total row count
+        """
+        conn = DataManager.get_connection()
+        try:
+            result = conn.execute("""
+                SELECT COUNT(*) FROM payroll_data
+                WHERE company_id = ? AND period_year = ? AND period_month = ?
+            """, [company_id, year, month]).fetchone()
+            return result[0] if result else 0
+        finally:
+            DataManager.close_connection(conn)
+
     @staticmethod
     def get_employee_history(company_id: str, matricule: str,
                             start_year: int, start_month: int,
@@ -539,7 +632,44 @@ class DataManager:
             }
         finally:
             DataManager.close_connection(conn)
-    
+
+    @staticmethod
+    def get_monthly_aggregations(company_id: str, start_year: int, num_months: int = 12) -> pl.DataFrame:
+        """
+        Get monthly aggregations for dashboard charts (memory efficient)
+
+        Args:
+            company_id: Company identifier
+            start_year: Starting year for aggregation
+            num_months: Number of months to aggregate (default 12)
+
+        Returns:
+            Polars DataFrame with monthly aggregations (small dataset)
+        """
+        conn = DataManager.get_connection()
+        try:
+            result = conn.execute("""
+                SELECT
+                    period_year,
+                    period_month,
+                    COUNT(*) as employee_count,
+                    SUM(salaire_brut) as total_brut,
+                    SUM(salaire_net) as total_net,
+                    SUM(total_charges_patronales) as total_charges_pat,
+                    AVG(salaire_brut) as avg_brut,
+                    SUM(CASE WHEN edge_case_flag THEN 1 ELSE 0 END) as edge_cases
+                FROM payroll_data
+                WHERE company_id = ?
+                    AND period_year >= ?
+                GROUP BY period_year, period_month
+                ORDER BY period_year, period_month
+                LIMIT ?
+            """, [company_id, start_year - 1, num_months]).pl()
+
+            return result
+        finally:
+            DataManager.close_connection(conn)
+
     @staticmethod
     def get_available_periods(company_id: str) -> List[Dict]:
         """Get list of available periods for a company"""

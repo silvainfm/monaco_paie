@@ -9,6 +9,7 @@ from pathlib import Path
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from services.data_mgt import DataManager
 from services.shared_utils import (
     require_company_and_period,
     load_period_data_cached,
@@ -28,14 +29,13 @@ if not require_company_and_period():
 
 month, year = map(int, st.session_state.current_period.split('-'))
 
-# Use cached data loading (Object columns already dropped)
-df = load_period_data_cached(st.session_state.current_company, month, year)
+summary = DataManager.get_company_summary(st.session_state.current_company, year, month)
 
-if df.is_empty():
+if not summary or summary.get('employee_count', 0) == 0:
     st.info("Aucune donnée pour cette période. Commencez par importer les données.")
     st.stop()
 
-# Premium metrics cards
+# Premium metrics cards (using aggregated summary - memory efficient)
 col1, col2, col3, col4 = st.columns(4)
 
 metrics_style = """
@@ -46,19 +46,20 @@ metrics_style = """
 """
 
 with col1:
-    st.markdown(metrics_style.format("SALARIÉS", len(df)), unsafe_allow_html=True)
+    st.markdown(metrics_style.format("SALARIÉS", summary['employee_count']), unsafe_allow_html=True)
 
 with col2:
-    total_brut = df.select(pl.col('salaire_brut').sum()).item() if 'salaire_brut' in df.columns else 0
+    total_brut = summary.get('total_brut', 0)
     st.markdown(metrics_style.format("MASSE SALARIALE", f"{total_brut:,.0f} €"), unsafe_allow_html=True)
 
 with col3:
-    edge_cases = df.select(pl.col('edge_case_flag').sum()).item() if 'edge_case_flag' in df.columns else 0
+    edge_cases = summary.get('edge_cases', 0)
     st.markdown(metrics_style.format("CAS À VÉRIFIER", edge_cases), unsafe_allow_html=True)
 
 with col4:
-    validated = df.filter(pl.col('statut_validation') == True).height if 'statut_validation' in df.columns else 0
-    st.markdown(metrics_style.format("VALIDÉES", f"{validated}/{len(df)}"), unsafe_allow_html=True)
+    validated = summary.get('validated', 0)
+    total = summary['employee_count']
+    st.markdown(metrics_style.format("VALIDÉES", f"{validated}/{total}"), unsafe_allow_html=True)
 
 st.markdown("---")
 
@@ -114,15 +115,25 @@ st.markdown("---")
 st.markdown("---")
 st.subheader("Employés avec cas particuliers")
 
-if 'edge_case_flag' in df.columns:
-    edge_cases_df = df.filter(pl.col('edge_case_flag') == True)
-    if not edge_cases_df.is_empty():
-        display_cols = ['matricule', 'nom', 'prenom']
-        if 'salaire_brut' in edge_cases_df.columns:
-            display_cols.append('salaire_brut')
-        if 'edge_case_reason' in edge_cases_df.columns:
-            display_cols.append('edge_case_reason')
+edge_count = summary.get('edge_cases', 0)
 
-        st.dataframe(edge_cases_df.select(display_cols), width='stretch')
-    else:
-        st.success("Aucun cas particulier détecté")
+if edge_count > 0:
+# Load only employees with edge cases using DuckDB filter
+    conn = DataManager.get_connection()
+    try:
+        edge_cases_df = conn.execute("""
+            SELECT matricule, nom, prenom, salaire_brut, edge_case_reason
+            FROM payroll_data
+            WHERE company_id = ? AND period_year = ? AND period_month = ?
+            AND edge_case_flag = true
+            ORDER BY matricule
+            """, [st.session_state.current_company, year, month]).pl()
+        
+        if not edge_cases_df.is_empty():
+            st.dataframe(edge_cases_df, width='stretch')
+        else:
+            st.success("Aucun cas particulier détecté")
+    finally:
+        DataManager.close_connection(conn)
+else:
+    st.success("Aucun cas particulier détecté")

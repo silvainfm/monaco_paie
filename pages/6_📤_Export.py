@@ -47,7 +47,8 @@ month, year = map(int, st.session_state.current_period.split('-'))
 # Load company details
 company_details = DataManager.get_company_details(st.session_state.current_company)
 
-df = DataManager.load_period_data(st.session_state.current_company, month, year)
+# OPTIMIZED: Use summary instead of loading full dataset
+summary = DataManager.get_company_summary(st.session_state.current_company, year, month)
 
 # Display company info with planning_jour_paie
 if company_details:
@@ -61,7 +62,7 @@ if company_details:
             st.markdown(f"**Jour de paie:** Le {jour} du mois")
     st.markdown("---")
 
-if df.is_empty():
+if not summary or summary.get('employee_count', 0) == 0:
     st.warning("Aucune donnée à exporter. Lancez d'abord le traitement des paies.")
     st.stop()
 
@@ -70,22 +71,23 @@ tab1, tab2, tab3, tab4 = st.tabs(["Exporter par Excel", "Voir le Rapport", "Envo
 with tab1:
     st.info("📊 **Export Excel avec mise en forme**")
 
-    # Preview key statistics
+    # Preview key statistics (using summary - memory efficient)
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("Employés", len(df))
+        st.metric("Employés", summary['employee_count'])
     with col2:
-        total_brut = df.select(pl.col('salaire_brut').sum()).item() if 'salaire_brut' in df.columns else 0
+        total_brut = summary.get('total_brut', 0)
         st.metric("Masse salariale", f"{total_brut:,.0f} €")
     with col3:
-        total_net = df.select(pl.col('salaire_net').sum()).item() if 'salaire_net' in df.columns else 0
+        total_net = summary.get('total_net', 0)
         st.metric("Net à payer", f"{total_net:,.0f} €")
 
     if st.button("📥 Générer Excel", type="primary", width='stretch'):
         try:
+            # Load data only when exporting (memory efficient)
+            df = DataManager.load_period_data(st.session_state.current_company, month, year)
 
             output = io.BytesIO()
-
 
             with Workbook(output) as wb:
                 # Sheet 1: Main payroll data with conditional formatting
@@ -202,6 +204,9 @@ with tab2:
     st.info("📋 **Rapport de synthèse**")
 
     if st.button("Voir rapport", width='stretch'):
+        # Load df only for detailed breakdown (lazy loading)
+        df = DataManager.load_period_data(st.session_state.current_company, month, year)
+
         st.markdown("---")
         st.subheader("Rapport de synthèse")
 
@@ -209,40 +214,36 @@ with tab2:
 
         with col1:
             st.write("**Statistiques générales:**")
-            st.write(f"- Nombre total d'employés: {len(df)}")
+            st.write(f"- Nombre total d'employés: {summary['employee_count']}")
 
-            validated_count = df.filter(pl.col('statut_validation') == True).height if 'statut_validation' in df.columns else 0
+            validated_count = summary.get('validated', 0)
             st.write(f"- Fiches validées: {validated_count}")
 
-            edge_count = df.select(pl.col('edge_case_flag').sum()).item() if 'edge_case_flag' in df.columns else 0
+            edge_count = summary.get('edge_cases', 0)
             st.write(f"- Cas à vérifier: {edge_count}")
 
             # Validation percentage
             if validated_count > 0:
-                pct = (validated_count / len(df)) * 100
+                pct = (validated_count / summary['employee_count']) * 100
                 st.write(f"- Taux de validation: {pct:.1f}%")
 
         with col2:
             st.write("**Statistiques financières:**")
-            if 'salaire_brut' in df.columns:
-                total_brut = df.select(pl.col('salaire_brut').sum()).item()
-                st.write(f"- Masse salariale brute: {total_brut:,.2f} €")
+            total_brut = summary.get('total_brut', 0)
+            st.write(f"- Masse salariale brute: {total_brut:,.2f} €")
 
-                # Average salary
-                avg_brut = df.select(pl.col('salaire_brut').mean()).item()
-                st.write(f"- Salaire brut moyen: {avg_brut:,.2f} €")
+            # Average salary
+            avg_brut = total_brut / summary['employee_count'] if summary['employee_count'] > 0 else 0
+            st.write(f"- Salaire brut moyen: {avg_brut:,.2f} €")
 
-            if 'salaire_net' in df.columns:
-                total_net = df.select(pl.col('salaire_net').sum()).item()
-                st.write(f"- Total net à payer: {total_net:,.2f} €")
+            total_net = summary.get('total_net', 0)
+            st.write(f"- Total net à payer: {total_net:,.2f} €")
 
-            if 'total_charges_patronales' in df.columns:
-                total_charges = df.select(pl.col('total_charges_patronales').sum()).item()
-                st.write(f"- Charges patronales: {total_charges:,.2f} €")
+            total_charges = summary.get('total_charges_pat', 0)
+            st.write(f"- Charges patronales: {total_charges:,.2f} €")
 
-            if 'cout_total_employeur' in df.columns:
-                total_cout = df.select(pl.col('cout_total_employeur').sum()).item()
-                st.write(f"- **Coût total employeur: {total_cout:,.2f} €**")
+            total_cout = summary.get('total_cost', 0)
+            st.write(f"- **Coût total employeur: {total_cout:,.2f} €**")
 
         # Additional breakdown by status
         if 'statut_validation' in df.columns:
