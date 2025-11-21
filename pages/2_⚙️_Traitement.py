@@ -15,7 +15,7 @@ from services.data_mgt import DataManager
 from services.edge_case_agent import EdgeCaseAgent
 from services.payslip_helpers import check_and_restart_time_tracking
 
-st.set_page_config(page_title="Processing", page_icon="⚙️", layout="wide")
+st.set_page_config(page_title="Traitement", page_icon="⚙️", layout="wide")
 
 # Render sidebar with company/period selection
 render_sidebar()

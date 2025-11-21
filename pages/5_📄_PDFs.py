@@ -20,8 +20,6 @@ from services.payslip_helpers import clean_employee_data_for_pdf
 
 def get_available_years(company_id: str) -> list:
     """Get distinct years available for company from parquet files"""
-    from pathlib import Path
-    import polars as pl
 
     consolidated_dir = Path("data/consolidated")
 
@@ -52,7 +50,7 @@ def get_available_years(company_id: str) -> list:
 
     return sorted(list(years_set), reverse=True)
 
-st.set_page_config(page_title="PDF Generation", page_icon="📄", layout="wide")
+st.set_page_config(page_title="PDF", page_icon="📄", layout="wide")
 
 # Render sidebar with company/period selection
 render_sidebar()

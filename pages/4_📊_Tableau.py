@@ -17,7 +17,7 @@ from services.shared_utils import (
     render_sidebar
 )
 
-st.set_page_config(page_title="Tableau de bord", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Tableau", page_icon="📊", layout="wide")
 
 # Render sidebar with company/period selection
 render_sidebar()
