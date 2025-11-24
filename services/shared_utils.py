@@ -114,7 +114,7 @@ def render_sidebar():
             </div>
         """.format(st.session_state.user, st.session_state.role), unsafe_allow_html=True)
 
-        if st.button("Déconnexion", use_container_width=True):
+        if st.button("Déconnexion", width='stretch'):
             # Stop time tracking before clearing session
             stop_time_tracking()
             for key in list(st.session_state.keys()):

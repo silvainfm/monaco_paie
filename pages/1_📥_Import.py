@@ -96,7 +96,7 @@ with tab1:
             save_label = "💾 Sauvegarder les données" if not check_result['existing'] else f"⚠️ Écraser {len(check_result['existing'])} employé(s) et sauvegarder"
             button_type = "primary" if not check_result['existing'] else "secondary"
 
-            if st.button(save_label, type=button_type, use_container_width=True):
+            if st.button(save_label, type=button_type, width='stretch'):
                 DataManager.save_period_data(
                     df_import,
                     st.session_state.current_company,

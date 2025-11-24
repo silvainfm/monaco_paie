@@ -7,7 +7,6 @@ Helper functions for payslip validation, editing, and data cleaning
 import json
 import streamlit as st
 import polars as pl
-import pandas as pd
 import numpy as np
 import math
 from datetime import datetime
@@ -41,13 +40,13 @@ def load_rubrics_from_excel() -> List[Dict]:
         return []
 
     try:
-        df = pd.read_excel(excel_path)
+        df = pl.read_excel(excel_path)
 
         rubrics = []
-        for _, row in df.iterrows():
+        for row in df.iter_rows(named=True):
             # Filter logic: exclude auto and mandatory rubrics
-            ajout_auto = str(row.get('Ajout automatique', '')).strip().upper() == 'X'
-            presence_oblig = str(row.get('Presence obligatoire', '')).strip().upper() == 'X'
+            ajout_auto = str(row.get('Ajout automatique') or '').strip().upper() == 'X'
+            presence_oblig = str(row.get('Presence obligatoire') or '').strip().upper() == 'X'
 
             # Skip if auto-added or mandatory
             if ajout_auto or presence_oblig:
@@ -57,11 +56,11 @@ def load_rubrics_from_excel() -> List[Dict]:
                 'code': int(row['Rémunération']),
                 'label': str(row['Libellé']),
                 'field_name': str(row['field_name']),
-                'calcul': str(row.get('Calcul', '')),
-                'cotisable_mc': str(row.get('Cotisable MC  ?', '')).strip().upper() == 'X',
-                'cotisable_autres': str(row.get('Cotisable autres cot ?', '')).strip().upper() == 'X',
-                'base_cp': str(row.get('Base CP', '')).strip().upper() == 'X',
-                'imposable': str(row.get('Imposable ?', '')).strip().upper() == 'X',
+                'calcul': str(row.get('Calcul') or ''),
+                'cotisable_mc': str(row.get('Cotisable MC  ?') or '').strip().upper() == 'X',
+                'cotisable_autres': str(row.get('Cotisable autres cot ?') or '').strip().upper() == 'X',
+                'base_cp': str(row.get('Base CP') or '').strip().upper() == 'X',
+                'imposable': str(row.get('Imposable ?') or '').strip().upper() == 'X',
             }
             rubrics.append(rubric)
 
@@ -524,7 +523,7 @@ def audit_log_page():
     # Convert to Polars DataFrame
     logs_df = pl.DataFrame(all_logs)
     logs_df = logs_df.with_columns(
-        pl.col('timestamp').str.strptime(pl.Datetime, format='%Y-%m-%dT%H:%M:%S.%f')
+        pl.col('timestamp').str.strptime(pl.Datetime, format='%Y-%m-%dT%H:%M:%S%.f')
     ).sort('timestamp', descending=True)
 
     # Add entry_type column if missing (for backward compatibility)
@@ -569,7 +568,7 @@ def audit_log_page():
             # Display
             st.dataframe(
                 filtered.select(['timestamp', 'user', 'matricule', 'field', 'old_value', 'new_value', 'reason']).to_pandas(),
-                use_container_width=True
+                width='stretch'
             )
 
     with tab2:
@@ -604,7 +603,7 @@ def audit_log_page():
             # Display
             st.dataframe(
                 filtered_time.select(['timestamp', 'user', 'company', 'period', 'duration_minutes', 'session_start', 'session_end']).to_pandas(),
-                use_container_width=True
+                width='stretch'
             )
 
     with tab3:
@@ -624,7 +623,7 @@ def audit_log_page():
 
             st.dataframe(
                 time_by_company.select(['company', 'period', 'total_hours', 'sessions']).to_pandas(),
-                use_container_width=True
+                width='stretch'
             )
 
             # Time per accountant
@@ -639,7 +638,7 @@ def audit_log_page():
 
             st.dataframe(
                 time_by_user.select(['user', 'total_hours', 'sessions', 'clients']).to_pandas(),
-                use_container_width=True
+                width='stretch'
             )
 
 # ============================================================================

@@ -78,6 +78,7 @@ class DataManager:
         conn = DataManager.get_connection()
 
         try:
+            # Migrate payroll_data table
             # Check which columns exist
             existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(payroll_data)").fetchall()}
 
@@ -145,6 +146,37 @@ class DataManager:
                 if col_name not in existing_cols:
                     conn.execute(f"ALTER TABLE payroll_data ADD COLUMN {col_name} {col_type}")
                     logger.info(f"Added column {col_name}")
+
+            # Migrate companies table (fix missing columns)
+            try:
+                companies_cols = {row[1] for row in conn.execute("PRAGMA table_info(companies)").fetchall()}
+
+                # Required columns for companies table
+                required_company_cols = [
+                    ("nom_societe", "VARCHAR"),
+                    ("siret", "VARCHAR"),
+                    ("code_naf", "VARCHAR"),
+                    ("numero_employeur", "VARCHAR"),
+                    ("adresse", "VARCHAR"),
+                    ("telephone", "VARCHAR"),
+                    ("point_contact", "VARCHAR"),
+                    ("mode_envoie_bulletin", "VARCHAR"),
+                    ("planning_jour_paie", "INTEGER"),
+                ]
+
+                for col_name, col_type in required_company_cols:
+                    if col_name not in companies_cols:
+                        conn.execute(f"ALTER TABLE companies ADD COLUMN {col_name} {col_type}")
+                        logger.info(f"Added column {col_name} to companies table")
+
+                # If 'name' column exists but 'nom_societe' was just added, copy data
+                if 'name' in companies_cols and 'nom_societe' not in companies_cols:
+                    conn.execute("UPDATE companies SET nom_societe = name WHERE nom_societe IS NULL")
+                    logger.info("Copied name to nom_societe")
+
+            except Exception as e:
+                logger.warning(f"Error migrating companies table: {e}")
+
         except Exception as e:
             logger.warning(f"Error during migration: {e}")
         finally:
@@ -895,9 +927,14 @@ class DataAuditLogger:
         conn = DataManager.get_connection()
 
         try:
+            # Create sequence for auto-incrementing id
+            conn.execute("""
+                CREATE SEQUENCE IF NOT EXISTS audit_log_id_seq START 1
+            """)
+
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS audit_log (
-                    id INTEGER PRIMARY KEY,
+                    id INTEGER PRIMARY KEY DEFAULT nextval('audit_log_id_seq'),
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     user VARCHAR,
                     action VARCHAR,
