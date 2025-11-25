@@ -25,6 +25,13 @@ LOCK_TIMEOUT = 5.0
 
 logger = logging.getLogger(__name__)
 
+# Check if running in Streamlit
+try:
+    import streamlit as st
+    HAS_STREAMLIT = True
+except ImportError:
+    HAS_STREAMLIT = False
+
 
 def _acquire_lock(timeout: float = LOCK_TIMEOUT):
     """Acquire file lock for thread-safe operations"""
@@ -285,9 +292,56 @@ class AuthManager:
             return False
 
     @staticmethod
+    def _load_users_from_secrets():
+        """
+        Load users from Streamlit secrets if available
+
+        Expects secrets format:
+        [users.user1]
+        username = "admin"
+        password = "SecurePass123"
+        role = "admin"
+        name = "Administrator"
+
+        [users.user2]
+        username = "test"
+        password = "TestPass456"
+        role = "comptable"
+        name = "Test User"
+        """
+        if not HAS_STREAMLIT:
+            return []
+
+        try:
+            if "users" not in st.secrets:
+                return []
+
+            users = []
+            for key in st.secrets["users"]:
+                user_config = st.secrets["users"][key]
+                users.append({
+                    "username": user_config.get("username"),
+                    "password": user_config.get("password"),
+                    "role": user_config.get("role", "comptable"),
+                    "name": user_config.get("name", ""),
+                })
+
+            logger.info(f"Loaded {len(users)} users from Streamlit secrets")
+            return users
+
+        except Exception as e:
+            logger.warning(f"Error loading users from secrets: {e}")
+            return []
+
+    @staticmethod
     def create_default_users():
         """
         Create default users for the Monaco Payroll System
+
+        Priority:
+        1. Load from Streamlit secrets (for cloud deployment)
+        2. Use hardcoded defaults (for local development)
+
         Only creates users if none exist
         """
         try:
@@ -295,25 +349,39 @@ class AuthManager:
             if len(AuthManager.list_users()) > 0:
                 logger.info("Users already exist, skipping default user creation")
                 return
-            
-            # Create default admin user
-            AuthManager.add_or_update_user(
-                username="admin",
-                password="admin123",
-                role="admin",
-                name="Administrateur Système"
-            )
-            
-            # Create default comptable user
-            AuthManager.add_or_update_user(
-                username="comptable",
-                password="compta123",
-                role="comptable", 
-                name="Comptable Monaco"
-            )
-            
-            logger.info("Created default users: admin and comptable")
-            
+
+            # Try loading from Streamlit secrets first
+            secret_users = AuthManager._load_users_from_secrets()
+
+            if secret_users:
+                # Create users from secrets
+                for user in secret_users:
+                    if user.get("username") and user.get("password"):
+                        AuthManager.add_or_update_user(
+                            username=user["username"],
+                            password=user["password"],
+                            role=user.get("role", "comptable"),
+                            name=user.get("name", "")
+                        )
+                logger.info(f"Created {len(secret_users)} users from Streamlit secrets")
+            else:
+                # Fallback to default local users
+                AuthManager.add_or_update_user(
+                    username="admin",
+                    password="admin123",
+                    role="admin",
+                    name="Administrateur Système"
+                )
+
+                AuthManager.add_or_update_user(
+                    username="comptable",
+                    password="compta123",
+                    role="comptable",
+                    name="Comptable Monaco"
+                )
+
+                logger.info("Created default local users: admin and comptable")
+
         except Exception as e:
             logger.error(f"Error creating default users: {e}")
             raise
